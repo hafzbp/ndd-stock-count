@@ -1,6 +1,6 @@
 // Backend tests against the real SQL (PGlite). Run: node backend.test.mjs
 import { setup, rpc, db } from "./server.mjs";
-import { parseMB52, variance } from "../js/pure.js";
+import { parseMB52, variance, mb52Names } from "../js/pure.js";
 import assert from "node:assert/strict";
 
 let pass = 0, fail = 0;
@@ -200,6 +200,23 @@ await t("can't open a partial with no SKUs", async () => {
   await rejects(rpc("admin_set_status", { p_token: ADM, p_status: "open" }), /MB52|Pick at least/);
 });
 
+console.log("single count (database)");
+await t("single count: mode saved on draft, locked once open, one team's count agreed in SQL", async () => {
+  await rpc("admin_draft", { p_token: ADM, p_name: "Single W5", p_scope: "total", p_skus: [] });
+  await rejects(rpc("admin_set_mode", { p_token: ADM, p_mode: "triple" }), /Bad count mode/);
+  const m = await rpc("admin_set_mode", { p_token: ADM, p_mode: "single" }); assert.equal(m.mode, "single");
+  await rpc("admin_set_status", { p_token: ADM, p_status: "open" });
+  await rejects(rpc("admin_set_mode", { p_token: ADM, p_mode: "double" }), /before counting opens/);
+  assert.equal((await rpc("public_config", {})).take.mode, "single"); assert.equal((await rpc("public_dashboard", {})).mode, "single");
+  const s = await rpc("counter_start", { p_token: TA, p_device: DEV1, p_branch: "NDD Alpha", p_role: "ops", p_data: { member: "Ali", names: ["Ali"], lines: {} } });
+  await rpc("counter_save", { p_token: TA, p_device: DEV1, p_id: s.id, p_data: { lines: { "A1|2027-03": L("A1", "2027-03", null, null, 264), "C3|2026-12": L("C3", "2026-12", null, null, 50) } } });
+  const v = (await db.query(`select code, batch, status, phys, v, sku_flag from private.variance((select (value #>> '{}')::uuid from public.settings where key='current_take')) where branch = 'NDD Alpha' and code in ('A1','C3') order by code, batch`)).rows;
+  const a = v.find((x) => x.code === "A1" && x.batch === "2027-03"), c = v.find((x) => x.code === "C3");
+  assert.equal(a.status, "MATCH"); assert.equal(Number(a.phys), 264); assert.equal(Number(a.v), 0);
+  assert.equal(c.status, "MATCH"); assert.equal(Number(c.v), -10); assert.equal(c.sku_flag, "OVER");
+  await rpc("admin_set_status", { p_token: ADM, p_status: "closed" });
+});
+
 console.log("stock report layout (SKU / Total in PCS)");
 await t("report layout parses: names matched ignoring case, plants, total row ignored, dd.mm.yyyy batches", async () => {
   const R = [["Plant", "PLANT DISCRIPTION", "Storage Loc.", "Batch", "Exp. date", "Manu. date", "SKU", "Description", "High(CTN)", "Total in PCS"],
@@ -217,6 +234,29 @@ await t("report layout parses: names matched ignoring case, plants, total row ig
 });
 await t("MB52 layout still the same (Unrestricted + Restricted + QI, values)", async () => {
   const r = parseMB52(rows, ["NDD Alpha", "NDD Beta"]); assert.equal(r.format, "mb52"); assert.equal(r.hasValue, true); assert.equal(r.exBadQ, 99); assert.equal(r.lines, 7);
+});
+
+await t("plant code wins over the name in the file", async () => {
+  const R = [["Plant", "Name 1", "Material", "Batch", "Unrestricted", "Value Unrestricted"],
+    ["1501", "NDD Alpha Sdn Bhd", "A1", "20270903", 10, 50], ["1777", "NDD Unknown", "A1", "20270903", 5, 25]];
+  const r = parseMB52(R, ["NDD Alpha"], { "1501": "NDD Alpha" });
+  assert.deepEqual(Object.keys(r.byBr), ["NDD Alpha"]); assert.equal(r.byBr["NDD Alpha"][0][2], 10); assert.equal(r.byBr["NDD Alpha"][0][3], 5);
+  assert.ok(r.skipped["1777 NDD Unknown"] !== undefined);
+  assert.deepEqual(mb52Names(R, ["NDD Alpha"], { "1501": "NDD Alpha" }).map(x => x.name + ":" + x.known), ["NDD Alpha:true", "NDD Unknown:false"]);
+});
+
+console.log("count mode");
+await t("single count: one team's count is agreed; both teams must still match", async () => {
+  const sys = [["A1", "2027-09", 100, 2], ["B2", "2027-02", 50, 1], ["C3", "2027-01", 10, 1]];
+  const docs = [{ role: "ops", lines: { a: { code: "A1", batch: "2027-09", pcs: 98 }, c: { code: "C3", batch: "2027-01", pcs: 10 } } },
+                { role: "fin", lines: { b: { code: "B2", batch: "2027-02", pcs: 50 }, c: { code: "C3", batch: "2027-01", pcs: 9 } } }];
+  const sm = { A1: {}, B2: {}, C3: {} };
+  const one = variance(sys, docs, sm, 2, true), by = Object.fromEntries(one.map(o => [o.code, o]));
+  assert.equal(by.A1.status, "MATCH"); assert.equal(by.A1.phys, 98); assert.equal(by.A1.v, -2); assert.equal(by.A1.vv, -4); assert.equal(by.A1.skuFlag, "WITHIN 2%");
+  assert.equal(by.B2.status, "MATCH"); assert.equal(by.B2.phys, 50); assert.equal(by.B2.skuFlag, "OK");
+  assert.equal(by.C3.status, "RECOUNT"); assert.equal(by.C3.skuFlag, "PENDING");
+  const two = Object.fromEntries(variance(sys, docs, sm, 2, false).map(o => [o.code, o]));
+  assert.equal(two.A1.status, "WAITING FINANCE"); assert.equal(two.B2.status, "WAITING OPS"); assert.equal(two.A1.skuFlag, "PENDING");
 });
 
 console.log("owner tools");

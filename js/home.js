@@ -14,6 +14,8 @@ import { exportXlsx } from "./export.js";
 function tok() { return S.admin.token; }
 function info() { return (S.adm && S.adm.takeInfo) || {}; }
 function appUrl() { return location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, ""); }
+function single(t) { return (t || info()).mode === "single"; }
+function typeTxt(t) { return (t.scope === "partial" ? "Partial · " + t.skuCount + " SKUs" : "Total") + " · " + (t.mode === "single" ? "Single count" : "Double count"); }
 function stateTag(s) { return el("span", { class: "state " + s, text: s === "open" ? "Open" : s === "closed" ? "Closed" : "Draft" }); }
 
 export function waMessage() {
@@ -21,7 +23,7 @@ export function waMessage() {
   return "Stock take: " + (t.name || "") + (t.scope === "partial" ? " (partial, " + t.skuCount + " SKUs)" : "") +
     "\n1. Open this link in Chrome or Safari (not inside WhatsApp): " + appUrl() +
     "\n2. Enter your warehouse plant code (for example 1508)" +
-    "\n3. Pick your team, type your name, start counting" + rule;
+    (single(t) ? "\n3. Type your name, start counting" : "\n3. Pick your team, type your name, start counting") + rule;
 }
 function messageBox() {
   var ta = el("textarea", { readonly: true, style: "min-height:130px;font-family:inherit;font-size:13.5px" }); ta.value = waMessage();
@@ -36,14 +38,20 @@ function progressRows() {
     var codes = {}; (S.sysBy[b] || []).forEach(function (r) { codes[r[0]] = 1; });
     var exp = Object.keys(codes).length, ses = S.counts.filter(function (d) { return d.branch === b; });
     function side(role) {
-      var x = ses.filter(function (d) { return sessRole(d) === role; }), done = {};
+      var x = ses.filter(function (d) { return !role || sessRole(d) === role; }), done = {};
       x.forEach(function (d) { Object.keys(d.lines || {}).forEach(function (k) { var l = d.lines[k]; if (hasQty(l) && codes[l.code]) done[l.code] = 1; }); });
       return { st: !x.length ? "Not started" : x.every(function (d) { return d.status === "submitted"; }) ? "Submitted" : "Counting", n: Object.keys(done).length, photos: x.reduce(function (a, d) { return a + (d.photos || 0); }, 0) };
     }
-    return { b: b, exp: exp, ops: side("ops"), fin: side("fin") };
-  }).filter(function (r) { return r.exp > 0 || r.ops.st !== "Not started" || r.fin.st !== "Not started"; });
+    return { b: b, exp: exp, ops: side("ops"), fin: side("fin"), all: side(null) };
+  }).filter(function (r) { return r.exp > 0 || r.all.st !== "Not started"; });
 }
 function progressTable() {
+  if (single()) {
+    var rs = progressRows(), ts = el("table", {}, el("tr", {}, ["Warehouse", "Status", "SKUs counted", "Photos"].map(function (h, i) { return el("th", { class: i === 2 ? "n" : "", text: h }); })));
+    rs.forEach(function (r) { ts.append(el("tr", {}, el("td", { text: r.b }), el("td", {}, el("span", { class: "pill " + (r.all.st === "Submitted" ? "ok" : r.all.st === "Counting" ? "warn" : ""), text: r.all.st })), el("td", { class: "n", text: r.all.n + " / " + r.exp }), el("td", { text: String(r.all.photos) }))); });
+    if (!rs.length) ts.append(el("tr", {}, el("td", { colspan: 4, class: "muted", text: "No warehouse has SKUs to count yet." })));
+    return el("div", { class: "tw" }, ts);
+  }
   var rows = progressRows(), t = el("table", {}, el("tr", {}, ["Warehouse", "Ops", "Ops SKUs", "Finance", "Finance SKUs", "Photos"].map(function (h, i) { return el("th", { class: i === 2 || i === 4 ? "n" : "", text: h }); })));
   rows.forEach(function (r) {
     var pill = function (s) { return el("span", { class: "pill " + (s === "Submitted" ? "ok" : s === "Counting" ? "warn" : ""), text: s }); };
@@ -67,10 +75,10 @@ function renderWizard(app, t) {
   var fresh = S.wizNew;
   var W = S.wiz && S.wiz.id === (fresh ? "new" : t.id) ? S.wiz : (S.wiz = {
     id: fresh ? "new" : t.id, step: 1,
-    name: fresh ? "" : t.name, scope: fresh ? "total" : (t.scope || "total"), skus: fresh ? {} : (t.skus || []).reduce(function (o, c) { o[c] = 1; return o; }, {})
+    name: fresh ? "" : t.name, scope: fresh ? "total" : (t.scope || "total"), mode: fresh ? "double" : (t.mode || "double"), skus: fresh ? {} : (t.skus || []).reduce(function (o, c) { o[c] = 1; return o; }, {})
   });
   var hasSys = !fresh && Object.keys(S.sysBy || {}).length > 0, partial = W.scope === "partial", nSku = Object.keys(W.skus).length;
-  var steps = [[1, "Name and type", W.name ? (partial ? "Partial" : "Total") : "Not set"], [2, "Pick SKUs", partial ? nSku + " picked" : "Not needed (Total)"], [3, "Upload MB52", hasSys ? Object.keys(S.sysBy).length + " warehouses" : "Not yet"], [4, "Open counting", "Review and open"]];
+  var steps = [[1, "Name and type", W.name ? (partial ? "Partial" : "Total") + " · " + (W.mode === "single" ? "Single" : "Double") : "Not set"], [2, "Pick SKUs", partial ? nSku + " picked" : "Not needed (Total)"], [3, "Upload MB52", hasSys ? Object.keys(S.sysBy).length + " warehouses" : "Not yet"], [4, "Open counting", "Review and open"]];
   app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: fresh ? "New stock take" : "Set up the stock take" }), stateTag("draft")));
   if (fresh) app.append(el("p", { class: "small muted", text: "The last stock take stays in History below." }));
   var bar = el("div", { class: "wiz" });
@@ -85,6 +93,7 @@ function renderWizard(app, t) {
     try {
       var skus = partial ? Object.keys(W.skus) : [];
       await rpc("admin_draft", { p_token: tok(), p_name: W.name, p_scope: W.scope, p_skus: skus });
+      await rpc("admin_set_mode", { p_token: tok(), p_mode: W.mode });
       S.wizNew = false; await loadAdmin(); S.wiz = Object.assign(W, { id: info().id, step: next }); hooks.render(); window.scrollTo(0, 0);
     } catch (e) { msg("Can't save", errText(e)); }
   }
@@ -95,7 +104,12 @@ function renderWizard(app, t) {
     [["total", "Total", "Count every SKU in the MB52"], ["partial", "Partial", "Count only the SKUs you pick"]].forEach(function (o) {
       ch.append(el("button", { class: "choice" + (W.scope === o[0] ? " on" : ""), onclick: function () { W.scope = o[0]; hooks.render(); } }, el("b", { text: o[1] }), el("div", { class: "small muted", text: o[2] })));
     });
+    var mc = el("div", { class: "grid", style: "margin-top:6px" });
+    [["double", "Double count", "Ops and Finance count separately. A line is agreed only when both match. For full stock takes and audits."], ["single", "Single count", "One team counts. Its count is the agreed count. Faster, but no second check."]].forEach(function (o) {
+      mc.append(el("button", { class: "choice" + (W.mode === o[0] ? " on" : ""), onclick: function () { W.mode = o[0]; hooks.render(); } }, el("b", { text: o[1] }), el("div", { class: "small muted", text: o[2] })));
+    });
     c.append(el("h3", { text: "1. Name and type" }), el("p", { class: "small muted", text: "Counters see this name. The type decides which SKUs they count." }), nm, ch,
+      el("p", { class: "small", style: "margin:14px 0 0;font-weight:600", text: "How many teams count?" }), mc,
       el("div", { class: "row", style: "justify-content:flex-end;margin-top:14px" }, fresh ? el("button", { class: "btn", text: "Cancel", onclick: function () { S.wizNew = false; S.wiz = null; hooks.render(); } }) : null,
         el("button", { class: "btn primary", text: "Save and continue", onclick: function () { W.name = nm.value.trim(); if (!W.name) { nm.focus(); return; } save(W.scope === "partial" ? 2 : 3); } })));
     return;
@@ -137,6 +151,7 @@ function renderWizard(app, t) {
     el("div", { class: "stats", style: "margin-top:8px" },
       el("div", { class: "stat" }, el("b", { text: t.name }), el("span", { text: "Name" })),
       el("div", { class: "stat" }, el("b", { text: t.scope === "partial" ? "Partial" : "Total" }), el("span", { text: t.scope === "partial" ? t.skuCount + " SKUs picked" : "All SKUs in MB52" })),
+      el("div", { class: "stat" }, el("b", { text: single(t) ? "Single" : "Double" }), el("span", { text: single(t) ? "One team counts" : "Ops + Finance must match" })),
       el("div", { class: "stat" }, el("b", { text: progressRows().length }), el("span", { text: "Warehouses with SKUs to count" })),
       el("div", { class: "stat" }, el("b", { text: (c2.photoMin || 0) + "–" + (c2.photoMax || 5) }), el("span", { text: "Photos per count" }))),
     readyTable(),
@@ -159,14 +174,14 @@ function readyTable() {
 
 /* ---------------- Open ---------------- */
 function renderOpen(app, t) {
-  var rows = progressRows(), both = rows.filter(function (r) { return r.ops.st === "Submitted" && r.fin.st === "Submitted"; }).length;
+  var sg = single(t), rows = progressRows(), done = function (r) { return sg ? r.all.st === "Submitted" : r.ops.st === "Submitted" && r.fin.st === "Submitted"; }, both = rows.filter(done).length;
   app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: t.name }), stateTag("open")),
-    el("p", { class: "small muted", text: (t.scope === "partial" ? "Partial · " + t.skuCount + " SKUs" : "Total") + " · open since " + tsTxt(t.openedAt) + " · updates every 20 seconds" }),
+    el("p", { class: "small muted", text: typeTxt(t) + " · open since " + tsTxt(t.openedAt) + " · updates every 20 seconds" }),
     el("div", { class: "stats" },
       el("div", { class: "stat" }, el("b", { text: rows.length }), el("span", { text: "Warehouses" })),
-      el("div", { class: "stat" }, el("b", { text: rows.filter(function (r) { return r.ops.st !== "Not started" || r.fin.st !== "Not started"; }).length }), el("span", { text: "Started" })),
-      el("div", { class: "stat" }, el("b", { text: both }), el("span", { text: "Both teams submitted" })),
-      el("div", { class: "stat" }, el("b", { text: rows.filter(function (r) { return r.ops.st === "Not started" && r.fin.st === "Not started"; }).length }), el("span", { text: "Not started" }))),
+      el("div", { class: "stat" }, el("b", { text: rows.filter(function (r) { return r.all.st !== "Not started"; }).length }), el("span", { text: "Started" })),
+      el("div", { class: "stat" }, el("b", { text: both }), el("span", { text: sg ? "Submitted" : "Both teams submitted" })),
+      el("div", { class: "stat" }, el("b", { text: rows.filter(function (r) { return r.all.st === "Not started"; }).length }), el("span", { text: "Not started" }))),
     el("div", { class: "card" }, el("h3", { text: "Progress" }), progressTable()),
     el("div", { class: "card" }, el("h3", { text: "Next" }),
       el("div", { class: "row" },
@@ -174,7 +189,7 @@ function renderOpen(app, t) {
         el("button", { class: "btn", text: "Message for warehouses", onclick: function () { openModal(function (sh) { sh.append(el("h3", { text: "Message for the warehouses" }), messageBox(), el("button", { class: "btn block", style: "margin-top:10px", text: "Close", onclick: closeModal })); }); } }),
         el("button", { class: "btn", text: "Replace MB52", onclick: function () { openModal(function (sh) { sh.append(mb52Card("Replace the MB52", function () { closeModal(); hooks.render(); }), el("button", { class: "btn block", text: "Cancel", onclick: closeModal })); }); } }),
         el("button", { class: "btn", style: "color:var(--bad)", text: "Close counting", onclick: function () {
-          var open = rows.filter(function (r) { return r.ops.st !== "Submitted" || r.fin.st !== "Submitted"; }).map(function (r) { return r.b; });
+          var open = rows.filter(function (r) { return !done(r); }).map(function (r) { return r.b; });
           confirmBox("Close counting?", (open.length ? "Not everyone has submitted yet: " + open.join(", ") + ".\n\n" : "") + "Counters can't change anything after this. Results, Excel, sign-off PDFs and the dashboard variance use what is saved now. You can reopen later.", "Close", async function () {
             try { await rpc("admin_set_status", { p_token: tok(), p_status: "closed" }); await loadAdmin(); hooks.render(); window.scrollTo(0, 0); } catch (e) { msg("Can't close", errText(e)); }
           });
@@ -193,7 +208,7 @@ function renderClosed(app, t) {
   });
   tbl.append(el("tr", { class: "tot" }, el("td", { text: "TOTAL" }), el("td", { class: "n", text: tot.m }), el("td", { class: "n", text: tot.r }), el("td", { class: "n", text: tot.o }), el("td", { class: "n", text: fmt(tot.q) }), el("td", { class: "n", text: fmt(tot.v, 2) })));
   app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: t.name }), stateTag("closed")),
-    el("p", { class: "small muted", text: (t.scope === "partial" ? "Partial · " + t.skuCount + " SKUs" : "Total") + " · closed " + tsTxt(t.closedAt) }),
+    el("p", { class: "small muted", text: typeTxt(t) + " · closed " + tsTxt(t.closedAt) }),
     el("div", { class: "card" }, el("h3", { text: "Results" }), el("div", { class: "tw" }, tbl)),
     el("div", { class: "card" }, el("h3", { text: "Next" }),
       el("div", { class: "row" },
@@ -211,7 +226,7 @@ function renderHistory(app) {
   if (!past.length) return;
   var t = el("table", {}, el("tr", {}, ["Stock take", "Type", "Status", "Opened", "Closed", ""].map(function (h) { return el("th", { text: h }); })));
   past.forEach(function (x) {
-    t.append(el("tr", {}, el("td", { text: x.name }), el("td", { text: x.scope === "partial" ? "Partial (" + x.skuCount + ")" : "Total" }), el("td", {}, stateTag(x.status)),
+    t.append(el("tr", {}, el("td", { text: x.name }), el("td", { text: (x.scope === "partial" ? "Partial (" + x.skuCount + ")" : "Total") + (x.mode === "single" ? " · Single" : " · Double") }), el("td", {}, stateTag(x.status)),
       el("td", { text: tsTxt(x.openedAt) }), el("td", { text: tsTxt(x.closedAt) }),
       el("td", {}, el("button", { class: "link", text: "View (read-only)", onclick: async function () { try { S.viewTake = x.id; await loadAdmin(); S.tab = "master"; hooks.render(); window.scrollTo(0, 0); } catch (e) { S.viewTake = null; msg("Can't load", errText(e)); } } }))));
   });

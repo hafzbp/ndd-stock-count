@@ -43,8 +43,9 @@ function findHeader(rows) {
 }
 function canon(branches) { var m = {}; branches.forEach(function (b) { m[normH(b)] = b; }); return m; }
 
-/** rows: array of arrays incl. header. branches: valid branch names (matched ignoring case/spaces). */
-export function parseMB52(rows, branches) {
+/** rows: array of arrays incl. header. branches: valid branch names (matched ignoring case/spaces).
+    plantMap (optional): { plantCode: branchName } - a known plant code wins over the name in the file. */
+export function parseMB52(rows, branches, plantMap) {
   var hd = findHeader(rows);
   if (!hd) throw new Error('No header row with "Plant" and "Material" (or "SKU").');
   var c = hd.col, hr = hd.row, mb52 = c.unr >= 0;
@@ -59,7 +60,7 @@ export function parseMB52(rows, branches) {
   for (var r = hr + 1; r < rows.length; r++) {
     var row = rows[r];
     var plant = String(v(row, "plant") || "").trim().replace(/\.0$/, ""), mat = String(v(row, "material") || "").trim().replace(/\.0$/, ""); if (!plant || !mat) continue;
-    var raw = String(v(row, "name") || "").trim(), name = brMap[normH(raw)] || raw;
+    var raw = String(v(row, "name") || "").trim(), byPlant = plantMap && plantMap[plant], name = byPlant || brMap[normH(raw)] || raw;
     if (v(row, "desc")) descs[mat] = String(v(row, "desc")).trim();
     transit += numv(v(row, "transit")); trV += numv(v(row, "vTransit"));
     var q = mb52 ? numv(v(row, "unr")) + numv(v(row, "rst")) + numv(v(row, "qi")) : numv(v(row, "pcs"));
@@ -68,7 +69,7 @@ export function parseMB52(rows, branches) {
     var slc = String(v(row, "sloc") || "").trim(), sld = String(v(row, "slocDesc") || "");
     if (badLoc(slc, sld)) { exQ += q; exV += val; continue; }
     if (!q) continue;
-    if (!brMap[normH(raw)]) { var k0 = plant + (raw ? " " + raw : ""); skipped[k0] = (skipped[k0] || 0) + val; continue; }
+    if (!byPlant && !brMap[normH(raw)]) { var k0 = plant + (raw ? " " + raw : ""); skipped[k0] = (skipped[k0] || 0) + val; continue; }
     (plants[name] = plants[name] || {})[plant] = 1;
     var b = monthOf(normBatch(v(row, "batch"))); if (b && !isMonthB(b)) bad[b] = 1;
     var key = name + "|" + mat + "|" + b, A = agg[key] || (agg[key] = { br: name, code: mat, b: b, q: 0, v: 0, sl: {} });
@@ -83,13 +84,13 @@ export function parseMB52(rows, branches) {
 }
 
 /** Distinct branch names (Name 1 / PLANT DISCRIPTION) in the file with their plant, matched to known branches ignoring case. */
-export function mb52Names(rows, branches) {
-  var hd = findHeader(rows); if (!hd || hd.col.name < 0) return [];
+export function mb52Names(rows, branches, plantMap) {
+  var hd = findHeader(rows); if (!hd) return [];
   var m = canon(branches || []), out = {};
   for (var r = hd.row + 1; r < rows.length; r++) {
-    var raw = String(rows[r][hd.col.name] || "").trim(), p = String(rows[r][hd.col.plant] || "").trim().replace(/\.0$/, "");
-    if (!raw) continue; var n = m[normH(raw)] || raw;
-    if (!out[n]) out[n] = { name: n, plant: p, known: !!m[normH(raw)] };
+    var raw = hd.col.name >= 0 ? String(rows[r][hd.col.name] || "").trim() : "", p = String(rows[r][hd.col.plant] || "").trim().replace(/\.0$/, "");
+    var bp = plantMap && plantMap[p]; if (!raw && !bp) continue; var n = bp || m[normH(raw)] || raw;
+    if (!out[n]) out[n] = { name: n, plant: p, known: !!(bp || m[normH(raw)]) };
   }
   return Object.keys(out).sort().map(function (k) { return out[k]; });
 }
@@ -127,7 +128,8 @@ export function calc(expr) {
  * sysRows: [[code,batch,qty,cost,sloc]], docs: sessions of that branch ({role,lines,names,member,extraSkus}),
  * sm: {code: sku}, tolPct: number (e.g. 2)
  */
-export function variance(sysRows, docs, sm, tolPct) {
+/* single = single-count mode: one team's count is the agreed count (if both teams counted a line, they must still match) */
+export function variance(sysRows, docs, sm, tolPct, single) {
   var out = {};
   function blank(code, b) { return { code: code, batch: b, sys: null, cost: null, q: { ops: { ctn: null, box: null, pcs: null, has: false }, fin: { ctn: null, box: null, pcs: null, has: false } }, rmk: [], who: { ops: {}, fin: {} } }; }
   (sysRows || []).forEach(function (r) { var mb = monthOf(r[1]), k = lk(r[0], mb), o = out[k] || (out[k] = blank(r[0], mb)); o.sys = (o.sys || 0) + r[2]; if (r[3]) o.cost = r[3]; });
@@ -149,8 +151,8 @@ export function variance(sysRows, docs, sm, tolPct) {
     /* a counted 0 on one side matches a blank on the other (nothing there) */
     if (!co && cf && cf.ok && cf.qty === 0) co = { ok: true, qty: 0 }; if (!cf && co && co.ok && co.qty === 0) cf = { ok: true, qty: 0 };
     o.opsQ = co && co.ok ? co.qty : null; o.finQ = cf && cf.ok ? cf.qty : null;
-    o.status = (!co && !cf) ? "NOT COUNTED" : ((co && !co.ok) || (cf && !cf.ok)) ? "NEEDS PCS FACTOR" : !cf ? "WAITING FINANCE" : !co ? "WAITING OPS" : Math.abs(o.opsQ - o.finQ) < 1e-9 ? "MATCH" : "RECOUNT";
-    o.counted = o.status === "MATCH"; o.phys = o.counted ? o.opsQ : null;
+    o.status = (!co && !cf) ? "NOT COUNTED" : ((co && !co.ok) || (cf && !cf.ok)) ? "NEEDS PCS FACTOR" : (single && !(co && cf)) ? "MATCH" : !cf ? "WAITING FINANCE" : !co ? "WAITING OPS" : Math.abs(o.opsQ - o.finQ) < 1e-9 ? "MATCH" : "RECOUNT";
+    o.counted = o.status === "MATCH"; o.phys = o.counted ? (co ? o.opsQ : o.finQ) : null;
     o.v = o.counted ? o.phys - (o.sys || 0) : null; o.vv = (o.v != null && o.cost) ? o.v * o.cost : null;
     return o;
   }).sort(function (a, b) { return (a.code + a.batch).localeCompare(b.code + b.batch); });

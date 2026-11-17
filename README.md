@@ -16,7 +16,9 @@ the app compares both and then compares the agreed count to SAP MB52.
 | Anyone | Dashboard link | What Settings → Public dashboard allows |
 
 ## A stock take, start to finish
-1. **Stock take tab → wizard (Draft):** name + Total or Partial → pick SKUs (Partial) → upload MB52 → review → **Open counting**.
+1. **Stock take tab → wizard (Draft):** name + Total or Partial + Double or Single count → pick SKUs (Partial) → upload MB52 → review → **Open counting**.
+   - **Double count:** Ops and Finance count separately; a line is agreed only when both match.
+   - **Single count:** one team counts (no team step for counters); its count is the agreed count. If both teams happen to count a line, they must still match.
 2. **Open:** send the one WhatsApp message; counters open the link, enter the plant code, pick team, type name, count.
    Admin watches progress (Stock take tab, Master) and sends recount lists.
 3. **Close counting:** results per warehouse, Excel, sign-off PDF per warehouse, dashboard variance (by level).

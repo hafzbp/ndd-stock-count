@@ -7,7 +7,8 @@ import { openScanner, openScanSheet } from "./scan.js";
 import { photoBlock } from "./photos.js";
 
 export var REMARKS = ["Damaged", "Expired", "Near expiry", "Wrong location"];
-export function roleName(r) { return r === "fin" ? "Finance check" : "Ops count"; }
+function singleMode() { return !!(S.take && S.take.mode === "single"); }
+export function roleName(r) { return singleMode() ? "Count" : r === "fin" ? "Finance check" : "Ops count"; }
 function roleOf(t) { return t.role || "Checker"; }
 
 /* ---------- plant code (branch login) ---------- */
@@ -85,7 +86,8 @@ export function renderCount(app) {
   if (closed() && !isAdmin()) app.append(el("div", { class: "banner warn", text: tstatus() === "draft" ? "Counting hasn't started yet. Your admin will open it." : "Counting is closed." }));
   else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + ". Ask your admin to reopen if anything needs changing." }));
   if (S.take && S.take.scope === "partial") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Partial count · " + (bd.codes || []).length + " SKU(s) to count at this warehouse"));
-  app.append(el("div", { class: "banner", style: "background:" + (sessRole(m) === "fin" ? "var(--badbg);color:var(--accent)" : "var(--okbg);color:var(--ok)") },
+  if (singleMode()) app.append(el("div", { class: "banner", style: "background:var(--okbg);color:var(--ok)" }, "COUNT - count every SKU and batch you find, then submit."));
+  else app.append(el("div", { class: "banner", style: "background:" + (sessRole(m) === "fin" ? "var(--badbg);color:var(--accent)" : "var(--okbg);color:var(--ok)") },
     (sessRole(m) === "fin" ? "FINANCE CHECK" : "OPS COUNT") + " - count everything yourself. Do not share or compare numbers with the other team."));
   var nRc = Object.keys(rcMap()).length;
   if (nRc) app.append(el("div", { class: "banner bad" }, "⚠ Recount needed on " + nRc + " line(s). Tap the “Recount” filter, recount those batches and correct your numbers, then submit again."));
@@ -340,7 +342,8 @@ function renderStart(app) {
     return;
   }
   function stepBar(n) {
-    return el("div", { class: "steps" }, ["Warehouse", "Team", "Name"].map(function (t, i) { return el("div", { class: "stp" + (i < n ? " done" : i === n ? " now" : "") }, el("i"), el("span", { text: t })); }));
+    var labels = singleMode() ? ["Warehouse", "Name"] : ["Warehouse", "Team", "Name"]; if (singleMode() && n === 2) n = 1;
+    return el("div", { class: "steps" }, labels.map(function (t, i) { return el("div", { class: "stp" + (i < n ? " done" : i === n ? " now" : "") }, el("i"), el("span", { text: t })); }));
   }
   function reset() { S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); }
 
@@ -378,7 +381,7 @@ function renderStart(app) {
     app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: "Your warehouse" }), el("h2", { style: "font-size:24px;margin:6px 0 14px", text: st.branch }),
       S.take && S.take.scope === "partial" ? el("p", { class: "small", text: "Partial count: only the SKUs your admin picked." }) : null,
       el("div", { class: "row", style: "justify-content:center" },
-        el("button", { class: "btn primary", text: "Yes, that's my warehouse", onclick: function () { st.step = "team"; hooks.render(); } }),
+        el("button", { class: "btn primary", text: "Yes, that's my warehouse", onclick: function () { if (singleMode()) { st.role = "ops"; st.names = st.names || []; st.step = "names"; } else st.step = "team"; hooks.render(); } }),
         el("button", { class: "btn", text: "No, enter again", onclick: reset }))));
     return;
   }
@@ -400,9 +403,9 @@ function renderStart(app) {
   var role = st.role, names = st.names || [], list = namesFor(st.branch, role === "fin" ? "Checker" : "Counter");
   var startBtn = el("button", { class: "btn primary block", style: "margin-top:18px", text: "Start counting", onclick: go });
   function upd() { startBtn.disabled = !names.length; startBtn.textContent = names.length ? "Start " + roleName(role).toLowerCase() : (role === "fin" ? "Add your name first" : "Add at least one name"); }
-  app.append(stepBar(2), el("h2", { text: role === "fin" ? "Your name" : "Who is counting?" }), el("p", { class: "small muted", text: st.branch + " · " + (role === "fin" ? "Finance" : "Operations") + (role === "ops" ? " · add everyone counting together on this phone" : "") }),
+  app.append(stepBar(2), el("h2", { text: role === "fin" ? "Your name" : "Who is counting?" }), el("p", { class: "small muted", text: st.branch + (singleMode() ? "" : " · " + (role === "fin" ? "Finance" : "Operations")) + (role === "ops" ? " · add everyone counting together on this phone" : "") }),
     peoplePicker(list.mine, list.others, role === "ops", names, function (v) { names = v; st.names = v; upd(); }), startBtn,
-    el("button", { class: "link", text: "← Back", onclick: function () { st.step = "team"; hooks.render(); } }));
+    el("button", { class: "link", text: "← Back", onclick: function () { st.step = singleMode() ? "confirm" : "team"; hooks.render(); } }));
   upd();
   async function go() {
     if (!names.length) return;

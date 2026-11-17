@@ -2,7 +2,7 @@
 import { S } from "./state.js";
 import { el, fmt, bLabel, tsTxt, nowIso, openModal, closeModal, msg, saveBlob, loadJs, errText } from "./ui.js";
 import { monthOf, hasQty, sessRole } from "./pure.js";
-import { variance, branchesAdm, skuMap, tolPct, currentTake } from "./master.js";
+import { variance, branchesAdm, skuMap, tolPct, currentTake, isSingle } from "./master.js";
 
 var V = new URL("../vendor/", import.meta.url).href;
 function roleName(r) { return r === "fin" ? "Finance check" : "Ops count"; }
@@ -57,7 +57,8 @@ export function buildWorkbook() {
     ["E", "F", "G", "H", "I", "J", "K", "L", "Q", "S"].forEach(function (cl) { var cc = vs[cl + r]; if (cc && cc.v === "") delete vs[cl + r]; });
     if (qo.has) vs["M" + r] = { t: "n", f: "E" + r + "*K" + r + "+F" + r + "*L" + r + "+G" + r };
     if (qf.has) vs["N" + r] = { t: "n", f: "H" + r + "*K" + r + "+I" + r + "*L" + r + "+J" + r };
-    vs["O" + r] = { t: "s", f: 'IF(AND(M' + r + '="",N' + r + '=""),"NOT COUNTED",IF(M' + r + '="",IF(N' + r + '=0,"MATCH","WAITING OPS"),IF(N' + r + '="",IF(M' + r + '=0,"MATCH","WAITING FINANCE"),IF(M' + r + '=N' + r + ',"MATCH","RECOUNT"))))' };
+    vs["O" + r] = isSingle() ? { t: "s", f: 'IF(AND(M' + r + '="",N' + r + '=""),"NOT COUNTED",IF(OR(M' + r + '="",N' + r + '=""),"MATCH",IF(M' + r + '=N' + r + ',"MATCH","RECOUNT")))' }
+      : { t: "s", f: 'IF(AND(M' + r + '="",N' + r + '=""),"NOT COUNTED",IF(M' + r + '="",IF(N' + r + '=0,"MATCH","WAITING OPS"),IF(N' + r + '="",IF(M' + r + '=0,"MATCH","WAITING FINANCE"),IF(M' + r + '=N' + r + ',"MATCH","RECOUNT"))))' };
     vs["P" + r] = { t: "n", f: 'IF(O' + r + '="MATCH",IF(M' + r + '="",N' + r + ',M' + r + '),"")' };
     vs["R" + r] = { t: "n", f: 'IF(P' + r + '="","",P' + r + '-Q' + r + ')' };
     vs["T" + r] = { t: "n", f: 'IF(OR(R' + r + '="",S' + r + '=""),"",R' + r + '*S' + r + ')', z: "#,##0.00" };
@@ -87,7 +88,7 @@ export function buildWorkbook() {
   su["A" + (t + 5)] = { t: "s", v: "Lines still RECOUNT or WAITING (must be 0 before sign-off)" }; su["B" + (t + 5)] = { t: "n", f: "D" + t + "+E" + t };
   su["L1"] = { t: "s", v: "Tolerance per SKU" }; su["M1"] = { t: "n", v: tolPct() / 100, z: "0.0%" };
   var me = S.adm && S.adm.meta, tr = t + 7, ref = "A1:M" + (t + 5), tkx = currentTake();
-  su["L2"] = { t: "s", v: "Stock take" }; su["M2"] = { t: "s", v: (tkx.name || "") + (tkx.scope === "partial" ? " (partial, " + tkx.skuCount + " SKUs)" : " (total)") };
+  su["L2"] = { t: "s", v: "Stock take" }; su["M2"] = { t: "s", v: (tkx.name || "") + (tkx.scope === "partial" ? " (partial, " + tkx.skuCount + " SKUs)" : " (total)") + (tkx.mode === "single" ? ", single count" : ", double count") };
   if (me && tkx.scope === "partial") { su["A" + tr] = { t: "s", v: "MB52 tie-out not applicable: partial count compares only the picked SKUs." }; ref = "A1:M" + tr; me = null; }
   if (me) {
     var tie = [["MB52 TIE-OUT (value, RM) - upload of " + tsTxt(me.loadedAt), null],
@@ -120,7 +121,7 @@ export async function signoffPdf(b) {
   var Vr = variance(b), ses = S.counts.filter(function (d) { return d.branch === b; }), ops = ses.filter(function (d) { return sessRole(d) === "ops"; }), fin = ses.filter(function (d) { return sessRole(d) === "fin"; });
   var lc = {}, sk = {}, sysV = 0, agV = 0, vv = 0; Vr.forEach(function (o) { lc[o.status] = (lc[o.status] || 0) + 1; sysV += (o.sys || 0) * (o.cost || 0); if (o.counted) agV += (o.phys || 0) * (o.cost || 0); vv += o.vv || 0; });
   var G = Vr.skuGroups || {}; Object.keys(G).forEach(function (c) { var f = G[c].flag; sk[f] = (sk[f] || 0) + 1; });
-  var allSub = ops.length && fin.length && ses.every(function (d) { return d.status === "submitted"; }), open = (lc.RECOUNT || 0) + (lc["WAITING OPS"] || 0) + (lc["WAITING FINANCE"] || 0) + (lc["NEEDS PCS FACTOR"] || 0), final = allSub && !open;
+  var sg = isSingle(), allSub = (sg ? ses.length : ops.length && fin.length) && ses.every(function (d) { return d.status === "submitted"; }), open = (lc.RECOUNT || 0) + (lc["WAITING OPS"] || 0) + (lc["WAITING FINANCE"] || 0) + (lc["NEEDS PCS FACTOR"] || 0), final = allSub && !open;
   var title = (S.adm.settings && S.adm.settings.title) || "NDD Stock Count", tk = currentTake();
   var d = new J({ unit: "mm", format: "a4" }), W = 210, y = 16, F = function (n) { return fmt(n); }, R = function (n) { return n == null ? "" : fmt(n, 2); };
   /* company header: logo + name, red rule */
@@ -135,31 +136,33 @@ export async function signoffPdf(b) {
   d.text("Count submitted: " + (subs.length ? tsTxt(subs[0]) + (subs.length > 1 ? " to " + tsTxt(subs[subs.length - 1]) : "") : "-") + "     Generated: " + tsTxt(nowIso()), W - 14, y, { align: "right" }); y += 5;
   if (!final) { d.setTextColor(200, 0, 0); d.setFont("helvetica", "bold"); d.text("DRAFT - not final: " + (!allSub ? "not all counts submitted. " : "") + (open ? open + " line(s) still RECOUNT / WAITING." : ""), 14, y); d.setTextColor(0); d.setFont("helvetica", "normal"); y += 5; }
   if (tk.scope === "partial") { d.setFont("helvetica", "bold"); d.text("Partial count: " + tk.skuCount + " picked SKU(s) only.", 14, y); d.setFont("helvetica", "normal"); y += 5; }
-  d.text("Quantities in PCS. Double count: Operations and Finance counted separately; only MATCH lines are agreed. System = SAP MB52 good stock (bad/blocked excluded). Tolerance ±" + tolPct() + "% per SKU.", 14, y, { maxWidth: W - 28 }); y += 9;
+  d.text("Quantities in PCS. " + (sg ? "Single count: one team counted; its count is the agreed count." : "Double count: Operations and Finance counted separately; only MATCH lines are agreed.") + " System = SAP MB52 good stock (bad/blocked excluded). Tolerance ±" + tolPct() + "% per SKU.", 14, y, { maxWidth: W - 28 }); y += 9;
   d.autoTable({ startY: y, theme: "grid", styles: { fontSize: 9, cellPadding: 1.6 }, headStyles: { fillColor: [60, 60, 60] }, head: [["Summary", "Value"]],
-    body: [["Lines - MATCH", F(lc.MATCH || 0)], ["Lines - RECOUNT / WAITING", F(open)], ["Lines - NOT COUNTED (system stock, nobody counted)", F(lc["NOT COUNTED"] || 0)],
+    body: [[sg ? "Lines - COUNTED" : "Lines - MATCH", F(lc.MATCH || 0)], ["Lines - RECOUNT / WAITING", F(open)], ["Lines - NOT COUNTED (system stock, nobody counted)", F(lc["NOT COUNTED"] || 0)],
       ["SKUs - OK / WITHIN " + tolPct() + "%", F((sk.OK || 0) + (sk["WITHIN " + tolPct() + "%"] || 0))], ["SKUs - OVER " + tolPct() + "%", F(sk["OVER " + tolPct() + "%"] || 0)], ["SKUs - PENDING / NOT COUNTED / NOT IN SYSTEM", F((sk.PENDING || 0) + (sk["NOT COUNTED"] || 0) + (sk["NOT IN SYSTEM"] || 0))],
       ["System value (RM)", R(sysV)], ["Agreed count value (RM)", R(agV)], ["Net variance on agreed lines (RM)", R(vv)],
-      ["Warehouse photos (Ops / Finance)", ops.reduce(function (a, x) { return a + (x.photos || 0); }, 0) + " / " + fin.reduce(function (a, x) { return a + (x.photos || 0); }, 0)]],
+      sg ? ["Warehouse photos", String(ses.reduce(function (a, x) { return a + (x.photos || 0); }, 0))] : ["Warehouse photos (Ops / Finance)", ops.reduce(function (a, x) { return a + (x.photos || 0); }, 0) + " / " + fin.reduce(function (a, x) { return a + (x.photos || 0); }, 0)]],
     columnStyles: { 1: { halign: "right", cellWidth: 45 } }, margin: { left: 14, right: 14 } });
   y = d.lastAutoTable.finalY + 7;
   var okL = function (o) { return (o.status === "MATCH" || o.status === "NOT COUNTED") && (o.skuFlag === "OK" || /^WITHIN/.test(o.skuFlag)); };
-  var row = function (o) { return [o.code, o.desc, bLabel(o.batch), F(o.opsQ), F(o.finQ), o.status, F(o.phys), F(o.sys), F(o.v), R(o.vv), o.skuFlag]; };
-  var head = [["Item", "Description", "Batch", "Ops", "Fin", "Check", "Agreed", "System", "Var", "Var RM", "SKU result"]];
-  var cs = { 0: { cellWidth: 13 }, 1: { cellWidth: 44 }, 2: { cellWidth: 13 }, 3: { halign: "right" }, 4: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" }, 8: { halign: "right" }, 9: { halign: "right" } };
+  var row = sg ? function (o) { return [o.code, o.desc, bLabel(o.batch), o.status === "MATCH" ? "COUNTED" : o.status, F(o.phys), F(o.sys), F(o.v), R(o.vv), o.skuFlag]; }
+    : function (o) { return [o.code, o.desc, bLabel(o.batch), F(o.opsQ), F(o.finQ), o.status, F(o.phys), F(o.sys), F(o.v), R(o.vv), o.skuFlag]; };
+  var head = sg ? [["Item", "Description", "Batch", "Check", "Counted", "System", "Var", "Var RM", "SKU result"]] : [["Item", "Description", "Batch", "Ops", "Fin", "Check", "Agreed", "System", "Var", "Var RM", "SKU result"]];
+  var cs = sg ? { 0: { cellWidth: 13 }, 1: { cellWidth: 54 }, 2: { cellWidth: 13 }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } }
+    : { 0: { cellWidth: 13 }, 1: { cellWidth: 44 }, 2: { cellWidth: 13 }, 3: { halign: "right" }, 4: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" }, 8: { halign: "right" }, 9: { halign: "right" } };
   var ex = Vr.filter(function (o) { return !okL(o); });
   d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Exceptions (" + ex.length + " line(s))", 14, y); d.setFont("helvetica", "normal");
-  d.autoTable({ startY: y + 2, theme: "grid", styles: { fontSize: 7, cellPadding: 1.2 }, headStyles: { fillColor: [60, 60, 60] }, head: head, body: ex.length ? ex.map(row) : [["", "No exceptions", "", "", "", "", "", "", "", "", ""]], columnStyles: cs, margin: { left: 14, right: 14 } });
+  d.autoTable({ startY: y + 2, theme: "grid", styles: { fontSize: 7, cellPadding: 1.2 }, headStyles: { fillColor: [60, 60, 60] }, head: head, body: ex.length ? ex.map(row) : [head[0].map(function (x, i) { return i === 1 ? "No exceptions" : ""; })], columnStyles: cs, margin: { left: 14, right: 14 } });
   y = d.lastAutoTable.finalY + 8;
   if (y > 200) { d.addPage(); y = 18; }
   d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Declaration", 14, y); y += 5; d.setFont("helvetica", "normal"); d.setFontSize(9);
-  d.text("We confirm the quantities above were physically counted by us at " + b + ", and that the count was done without reference to the other team's figures or the system quantity.", 14, y, { maxWidth: W - 28 }); y += 11;
+  d.text("We confirm the quantities above were physically counted by us at " + b + (sg ? ", and that the count was done without reference to the system quantity." : ", and that the count was done without reference to the other team's figures or the system quantity."), 14, y, { maxWidth: W - 28 }); y += 11;
   var box = function (role, name, img, at) {
     if (y > 262) { d.addPage(); y = 18; } d.setDrawColor(150); d.rect(14, y, W - 28, 24); d.setFontSize(8); d.setTextColor(90); d.text(role, 16, y + 4); d.setTextColor(0); d.setFontSize(10); d.text(name || "Name:", 16, y + 11);
     d.setFontSize(8); d.text(at ? "Signed in app: " + tsTxt(at) : "Date:", 16, y + 19); if (img) { try { d.addImage(img, "JPEG", W - 14 - 62, y + 2, 60, 18); } catch (e) { } } else { d.line(W - 14 - 62, y + 19, W - 16, y + 19); d.text("Signature", W - 14 - 62, y + 22); } y += 27;
   };
   var signs = function (list, role) { if (!list.length) { box(role, "", "", ""); return; } list.forEach(function (x) { var nm = (x.names && x.names.length) ? x.names : [x.member]; nm.forEach(function (n) { var s = (x.sign || {})[n]; box(role, n, s && s.img, s && s.at); }); }); };
-  signs(ops, "Counted by - Operations"); signs(fin, "Checked by - Finance");
+  if (sg) signs(ses, "Counted by"); else { signs(ops, "Counted by - Operations"); signs(fin, "Checked by - Finance"); }
   box("Branch Manager / Person in charge", "", "", ""); box("Reviewed by - Finance HQ", "", "", "");
   var cnt = Vr.filter(function (o) { return o.status !== "NOT COUNTED"; });
   d.addPage(); d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Appendix - all counted lines (" + cnt.length + ")", 14, 16); d.setFont("helvetica", "normal");

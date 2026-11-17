@@ -15,13 +15,17 @@ function kpi(v, l, cls) { return el("div", { class: "kpi" }, el("b", { class: cl
 function draw(d) {
   document.title = (d.title || "Stock Count") + " · Dashboard";
   $("#title").textContent = (d.title || "Stock Count") + " · Live dashboard";
-  $("#sub").textContent = (d.take || "") + (d.scope === "partial" ? " · partial, " + d.skuCount + " SKUs" : "") + " · " + (d.status === "draft" ? "not started yet" : d.status === "closed" ? "counting closed" : "counting open") + " · updated " + tsTxt(d.generatedAt);
+  $("#sub").textContent = (d.take || "") + (d.scope === "partial" ? " · partial, " + d.skuCount + " SKUs" : "") + (d.mode === "single" ? " · single count" : "") + " · " + (d.status === "draft" ? "not started yet" : d.status === "closed" ? "counting closed" : "counting open") + " · updated " + tsTxt(d.generatedAt);
   var B = d.branches || [], app = $("#app"); app.innerHTML = "";
+  var sg = d.mode === "single";
+  /* single count: one team, whichever role it picked */
+  if (sg) B.forEach(function (b) { var s = [b.ops, b.fin]; b.one = s.indexOf("counting") >= 0 ? "counting" : s.indexOf("submitted") >= 0 ? "submitted" : "not_started"; b.oneDone = Math.max(b.opsDone, b.finDone); });
   var exp = 0, od = 0, fd = 0, both = 0, started = 0;
-  B.forEach(function (b) { exp += b.expected; od += b.opsDone; fd += b.finDone; if (b.ops === "submitted" && b.fin === "submitted") both++; if (b.ops !== "not_started" || b.fin !== "not_started") started++; });
+  if (sg) B.forEach(function (b) { exp += b.expected; od += b.oneDone; if (b.one === "submitted") both++; if (b.one !== "not_started") started++; });
+  else B.forEach(function (b) { exp += b.expected; od += b.opsDone; fd += b.finDone; if (b.ops === "submitted" && b.fin === "submitted") both++; if (b.ops !== "not_started" || b.fin !== "not_started") started++; });
   var k = el("div", { class: "kpis" },
-    kpi(B.length, "Branches"), kpi(started, "Started"), kpi(both, "Both teams submitted"),
-    kpi((exp ? Math.round(od / exp * 100) : 0) + "%", "Ops progress (SKUs)"), kpi((exp ? Math.round(fd / exp * 100) : 0) + "%", "Finance progress (SKUs)"));
+    kpi(B.length, "Branches"), kpi(started, "Started"), kpi(both, sg ? "Submitted" : "Both teams submitted"),
+    kpi((exp ? Math.round(od / exp * 100) : 0) + "%", sg ? "Progress (SKUs)" : "Ops progress (SKUs)"), sg ? null : kpi((exp ? Math.round(fd / exp * 100) : 0) + "%", "Finance progress (SKUs)"));
   if (d.showVariance) {
     var vq = 0, rm = 0, over = 0, rc = 0; B.forEach(function (b) { var v = b.variance || {}; vq += v.varQ || 0; rm += v.varRM || 0; over += v.skuOver || 0; rc += (v.recount || 0) + (v.waiting || 0); });
     k.append(kpi(fmt(vq), "Net variance (PCS)", vq < 0 ? "neg" : vq > 0 ? "pos" : ""), kpi(over, "SKUs over tolerance", over ? "neg" : ""), kpi(rc, "Lines still recount / waiting"));
@@ -35,9 +39,10 @@ function draw(d) {
   B.forEach(function (b) {
     var c = el("div", { class: "card" },
       el("h2", {}, el("span", { text: b.branch }), el("span", { class: "small muted", text: b.updatedAt ? "last update " + tsTxt(b.updatedAt) : "" })),
-      el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
+      sg ? el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" }, el("span", { class: "pill " + ST[b.one][1], text: ST[b.one][0] }))
+        : el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
         el("span", { class: "pill " + ST[b.ops][1], text: "Ops: " + ST[b.ops][0] }), el("span", { class: "pill " + ST[b.fin][1], text: "Finance: " + ST[b.fin][0] })),
-      bar("Ops count", b.opsDone, b.expected, "var(--ops)"), bar("Finance check", b.finDone, b.expected, "var(--fin)"));
+      sg ? bar("Counted", b.oneDone, b.expected, "var(--ops)") : bar("Ops count", b.opsDone, b.expected, "var(--ops)"), sg ? null : bar("Finance check", b.finDone, b.expected, "var(--fin)"));
     if (b.variance) {
       var v = b.variance;
       c.append(el("div", { class: "vrow" },

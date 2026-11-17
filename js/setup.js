@@ -29,7 +29,7 @@ export function mb52Card(title, onDone) {
   var A = S.adm, f = el("input", { type: "file", accept: ".xlsx,.xls,.csv" });
   var sysTxt = Object.keys(S.sysBy || {}).length ? Object.keys(S.sysBy).length + " branch(es) loaded" + (A.meta ? " · uploaded " + tsTxt(A.meta.loadedAt) : "") : "Nothing uploaded yet";
   var c = el("div", { class: "card" }, el("h3", { text: title }),
-    el("p", { class: "small muted", text: "SAP MB52: Plant 1501-1515, tick Display Batch Stocks + No zero stock lines, Non-Hierarchical, Export → Spreadsheet. The branch comes from “Name 1” and its plant code becomes the counters' login. GOOD stock only: Blocked Stock, bad-stock locations (BS00/BS01/SH00) and Stock in Transit are left out." }), f,
+    el("p", { class: "small muted", text: "SAP MB52: Plant 1501-1515, tick Display Batch Stocks + No zero stock lines, Non-Hierarchical, Export → Spreadsheet. Each row goes to its warehouse by plant code (new plants by “Name 1”). The stock report layout (SKU / PLANT DISCRIPTION / Total in PCS) also works, but has no RM values. GOOD stock only: Blocked Stock, bad-stock locations (BS00/BS01/SH00) and Stock in Transit are left out." }), f,
     el("p", { class: "small", style: "margin-top:8px;font-weight:600", text: sysTxt }));
   f.addEventListener("change", async function () {
     var file = f.files[0]; if (!file) return;
@@ -37,7 +37,8 @@ export function mb52Card(title, onDone) {
       var rows = await readSheet(file);
       var known = {}, ign = ((S.adm.settings || {}).x_ignore_branches || []);
       (S.adm.branches || []).forEach(function (b) { if (b.active) known[b.name] = 1; }); ign.forEach(function (n) { known[n] = 1; });
-      var names = mb52Names(rows, Object.keys(known)), fresh = names.filter(function (x) { return !x.known; });
+      var pm = {}; ((S.adm && S.adm.branches) || []).forEach(function (b) { (b.plants || []).forEach(function (p) { pm[p] = b.name; }); });
+      var names = mb52Names(rows, Object.keys(known), pm), fresh = names.filter(function (x) { return !x.known; });
       if (fresh.length) {
         var add = await askNewBranches(fresh);
         if (add === null) { f.value = ""; return; }
@@ -46,7 +47,7 @@ export function mb52Card(title, onDone) {
         if (skipNow.length) await rpc("admin_settings", { p_token: tok(), p_patch: { x_ignore_branches: ign.concat(skipNow) } });
         await loadAdmin();
       }
-      var res = parseMB52(rows, branchesAdm()), plants = res.plants;
+      var res = parseMB52(rows, branchesAdm(), pm), plants = res.plants;
       var skip = Object.keys(res.skipped).map(function (k) { return k + " RM" + fmt(res.skipped[k], 2); }).join(", ");
       var ti = S.adm.takeInfo || {}, picked = ti.scope === "partial" ? (ti.skus || []) : null, inFile = {};
       Object.keys(res.byBr).forEach(function (b) { res.byBr[b].forEach(function (r) { inFile[r[0]] = 1; }); });
