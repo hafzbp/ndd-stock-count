@@ -324,6 +324,9 @@ function renderStart(app) {
   var br = branches(), role = S.pickRole || "", pickBr = "", names = [];
   var ss = S.mine.sessions || {}, keys = Object.keys(ss);
   if (closed() && !isAdmin()) app.append(el("div", { class: "banner warn", text: "Counting is closed by Finance." }));
+  if (S.cfg && !S.cfg.ownerReady && br.length) app.append(el("div", { class: "banner warn row", style: "justify-content:space-between" },
+    el("span", { text: "Owner: set your password first (one-time setup code)." }),
+    el("button", { class: "btn primary", text: "Start first-time setup", onclick: function () { if (hooks.openLogin) hooks.openLogin(true); } })));
   if (keys.length) {
     app.append(el("h2", { text: "Continue a count" }));
     var cg = el("div", { class: "grid", style: "margin-bottom:18px" });

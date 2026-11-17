@@ -108,5 +108,6 @@ export function serve() {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   await setup();
   if (process.env.BOOTSTRAP_CODE) await db.query(`insert into private.secrets (key, value, expires_at) values ('bootstrap_code', extensions.crypt($1, extensions.gen_salt('bf')), now() + interval '7 days')`, [process.env.BOOTSTRAP_CODE]);
+  if (process.env.SEED_BRANCHES) for (const b of process.env.SEED_BRANCHES.split(",")) await db.query(`insert into public.branches (name, pin) values ($1, private.new_pin())`, [b]);
   serve(); console.log("ready on http://localhost:" + PORT + "/?api=local");
 }
