@@ -231,5 +231,13 @@ await t("10 wrong PINs lock the branch for 15 minutes", async () => {
   assert.equal((await rpc("pin_login", { p_branch: "NDD Alpha", p_pin: "4444" })).ok, true);
 });
 
+await t("new branches get unique automatic PINs", async () => {
+  const OW2 = (await rpc("admin_login", { p_password: "OwnerPass1" })).token;
+  const n = await rpc("admin_add_branches", { p_token: OW2, p_branches: ["NDD Delta", "NDD Epsilon", "NDD Alpha"] }); assert.equal(n, 2);
+  const a = await rpc("admin_load", { p_token: OW2 }); const pins = a.branches.filter((b) => b.pin).map((b) => b.pin);
+  const d = a.branches.find((b) => b.name === "NDD Delta"); assert.match(d.pin, /^\d{4}$/); assert.equal(new Set(pins).size, pins.length);
+  assert.equal(a.branches.find((b) => b.name === "NDD Alpha").pin, "4444");
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

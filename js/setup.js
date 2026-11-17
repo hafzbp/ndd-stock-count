@@ -2,7 +2,7 @@
 import { S, hooks, isOwner } from "./state.js";
 import { rpc } from "./api.js";
 import { el, fmt, tsTxt, msg, confirmBox, openModal, closeModal, saveBlob, loadJs, errText, pill } from "./ui.js";
-import { parseMB52, numv, parseBarcodeRows } from "./pure.js";
+import { parseMB52, numv, parseBarcodeRows, mb52Names } from "./pure.js";
 import { loadAdmin, branchesAdm, tolPct, currentTake } from "./master.js";
 
 var V = new URL("../vendor/", import.meta.url).href;
@@ -23,6 +23,21 @@ function readSheet(file) {
     rd.readAsArrayBuffer(file);
   });
 }
+/* MB52 has branch names the app doesn't know yet: tick the ones to add. Resolves to [names] or null (cancel). */
+function askNewBranches(list) {
+  return new Promise(function (done) {
+    openModal(function (sh) {
+      var boxes = list.map(function (x) { var cb = el("input", { type: "checkbox", checked: /^NDD/i.test(x.name) }); cb._n = x.name; return cb; });
+      sh.append(el("h3", { text: "New branches in this MB52" }),
+        el("p", { class: "small muted", text: "These “Name 1” values are not in the app yet. Tick the ones that are NDD warehouses to count - each gets a PIN automatically. Unticked ones are skipped (not counted)." }),
+        el("div", { style: "max-height:50vh;overflow:auto;margin:8px 0" }, list.map(function (x, i) { return el("label", { class: "row", style: "gap:8px;padding:6px 0;border-bottom:1px solid var(--line)" }, boxes[i], el("span", { text: x.name }), el("span", { class: "small muted", text: "plant " + x.plant })); })),
+        el("div", { class: "row", style: "margin-top:12px" },
+          el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: function () { closeModal(); done(null); } }),
+          el("button", { class: "btn primary", style: "flex:2", text: "Continue", onclick: function () { closeModal(); done(boxes.filter(function (b) { return b.checked; }).map(function (b) { return b._n; })); } })));
+    });
+  });
+}
+
 function card(title, sub) { var c = el("div", { class: "card" }, el("h3", { text: title }), sub ? el("p", { class: "small muted", text: sub }) : null); return c; }
 
 export function renderSetup(app) {
@@ -39,7 +54,15 @@ export function renderSetup(app) {
   f.addEventListener("change", async function () {
     var file = f.files[0]; if (!file) return;
     try {
-      var rows = await readSheet(file), res = parseMB52(rows, branchesAdm());
+      var rows = await readSheet(file);
+      var known = {}; (A.branches || []).forEach(function (b) { if (b.active) known[b.name] = 1; });
+      var fresh = mb52Names(rows).filter(function (x) { return !known[x.name]; });
+      if (fresh.length) {
+        var add = await askNewBranches(fresh);
+        if (add === null) { f.value = ""; return; }
+        if (add.length) { await rpc("admin_add_branches", { p_token: tok(), p_branches: add }); await loadAdmin(); }
+      }
+      var res = parseMB52(rows, branchesAdm());
       var skip = Object.keys(res.skipped).map(function (k) { return k + " RM" + fmt(res.skipped[k], 2); }).join(", ");
       confirmBox("Load MB52?", res.lines + " lines for " + Object.keys(res.byBr).length + " branch(es). Qty " + fmt(res.totQ, 0) + " PCS, RM " + fmt(res.totV, 2) + "." +
         (skip ? "\nSKIPPED (branch not in list): " + skip : "") + (res.badBatches.length ? "\n" + res.badBatches.length + " batch value(s) not readable as dates: " + res.badBatches.slice(0, 8).join(", ") : "") +

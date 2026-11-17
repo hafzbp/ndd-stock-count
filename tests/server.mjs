@@ -19,7 +19,7 @@ export async function setup() {
     create schema extensions; create extension pgcrypto with schema extensions;
     create schema storage;
     create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);`);
-  for (const f of fs.readdirSync(path.join(ROOT, "sql")).filter((x) => /^\d+_.*\.sql$/.test(x)).sort()) await db.exec(fs.readFileSync(path.join(ROOT, "sql", f), "utf8"));
+  for (const f of fs.readdirSync(path.join(ROOT, "sql")).filter((x) => /^\d+[a-z]?_.*\.sql$/.test(x)).sort()) await db.exec(fs.readFileSync(path.join(ROOT, "sql", f), "utf8"));
   const r = await db.query(`select p.proname, pg_get_function_identity_arguments(p.oid) as args from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'`);
   for (const row of r.rows) {
     sig[row.proname] = {};

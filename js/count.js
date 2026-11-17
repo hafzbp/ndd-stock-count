@@ -297,15 +297,28 @@ function peoplePicker(mine, others, multi, selected, onChange) {
     mine.concat(extra).forEach(function (n) { g.append(btn(n)); }); others.filter(function (n) { return mine.indexOf(n) < 0; }).forEach(function (n) { more.append(btn(n)); });
   }
   draw();
-  wrap.append(g, el("button", { class: "link", text: "Not listed?", onclick: function (e) {
-    more.classList.remove("hidden"); e.target.replaceWith(el("div", { class: "row", style: "margin-top:8px;flex-wrap:nowrap" }, typed,
-      el("button", { class: "btn", text: "Add", onclick: function () { var n = typed.value.trim(); if (!n) return; if (multi) { if (sel.indexOf(n) < 0) sel.push(n); } else sel = [n]; typed.value = ""; draw(); onChange(sel.slice()); } })));
-  } }), more);
+  function addTyped() { var n = typed.value.replace(/\s+/g, " ").trim(); if (!n) return; if (multi) { if (sel.indexOf(n) < 0) sel.push(n); } else sel = [n]; typed.value = ""; draw(); onChange(sel.slice()); }
+  typed.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addTyped(); } });
+  var typeRow = el("div", { class: "row", style: "margin-top:8px;flex-wrap:nowrap" }, typed, el("button", { class: "btn", text: "Add", onclick: addTyped }));
+  if (!mine.length) {
+    typed.placeholder = "Type your name, then Add"; wrap.append(g, typeRow);
+    if (others.length) wrap.append(el("button", { class: "link", text: "Or pick from other branches", onclick: function (e) { more.classList.remove("hidden"); e.target.remove(); } }), more);
+    return wrap;
+  }
+  wrap.append(g, el("button", { class: "link", text: "Not listed? Type a name", onclick: function (e) { more.classList.remove("hidden"); e.target.replaceWith(typeRow); } }), more);
   return wrap;
+}
+/* names typed on this phone are remembered per branch + role */
+function rememberNames(br, role, names) {
+  var k = "ndd2-names", m = store(k) || {}, key = br + "|" + role, cur0 = m[key] || [];
+  names.forEach(function (n) { if (cur0.indexOf(n) < 0) cur0.push(n); }); m[key] = cur0.slice(-12); store(k, m);
 }
 function namesFor(br, role) {
   var tm = team().filter(function (t) { return roleOf(t) === role; });
-  var mine = [], others = []; tm.forEach(function (t) { var a = t.branch === br ? mine : others; if (a.indexOf(t.name) < 0) a.push(t.name); }); return { mine: mine, others: others };
+  var mine = [], others = []; tm.forEach(function (t) { var a = t.branch === br ? mine : others; if (a.indexOf(t.name) < 0) a.push(t.name); });
+  var rem = ((store("ndd2-names") || {})[br + "|" + (role === "Checker" ? "fin" : "ops")] || []);
+  rem.forEach(function (n) { if (mine.indexOf(n) < 0) mine.push(n); });
+  return { mine: mine, others: others };
 }
 function renderStart(app) {
   var br = branches(), role = S.pickRole || "", pickBr = "", names = [];
@@ -359,6 +372,7 @@ function renderStart(app) {
     if (!names.length) return;
     var other = Object.keys(S.mine.sessions).some(function (k2) { var x2 = S.mine.sessions[k2]; return x2.branch === pickBr && sessRole(x2) !== role && sessHasQty(x2); });
     if (other && !isOwner()) { msg("Not allowed", "This phone already has a " + roleName(role === "ops" ? "fin" : "ops") + " for " + pickBr + ". Ops and Finance must count on different phones so the two counts stay independent."); return; }
+    rememberNames(pickBr, role, names);
     var who = names.join(", "), data = { member: who, names: names.slice(), countedBy: role === "ops" ? who : "", startedAt: nowIso(), lines: {} };
     var existing = Object.keys(S.mine.sessions).filter(function (k2) { var x2 = S.mine.sessions[k2]; return x2.branch === pickBr && sessRole(x2) === role; })[0];
     if (existing) { var e0 = S.mine.sessions[existing]; data.lines = e0.lines; data.extraSkus = e0.extraSkus; data.startedAt = e0.startedAt; }

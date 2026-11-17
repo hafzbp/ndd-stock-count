@@ -54,6 +54,20 @@ export function parseMB52(rows, branches) {
   return { trV: trV, exBadQ: exQ, exBadV: exV, exBlkQ: exB, exBlkV: exBV, byBr: byBr, descs: descs, skipped: skipped, badBatches: Object.keys(bad), transit: transit, rowsUsed: n, lines: Object.keys(agg).length, totQ: totQ, totV: totV };
 }
 
+/** Distinct "Name 1" values (branch names) in an MB52 sheet, with their plant. */
+export function mb52Names(rows) {
+  for (var i = 0; i < Math.min(rows.length, 30); i++) {
+    var h = rows[i].map(function (x) { return String(x == null ? "" : x).trim(); });
+    if (h.indexOf("Plant") >= 0 && h.indexOf("Material") >= 0) {
+      var pc = h.indexOf("Plant"), nc = h.indexOf("Name 1"), out = {};
+      if (nc < 0) return [];
+      for (var r = i + 1; r < rows.length; r++) { var n = String(rows[r][nc] || "").trim(), p = String(rows[r][pc] || "").trim(); if (n && !out[n]) out[n] = p; }
+      return Object.keys(out).sort().map(function (n) { return { name: n, plant: out[n] }; });
+    }
+  }
+  return [];
+}
+
 /** PCS from carton/box/pieces. returns {qty, ok} - qty null if nothing entered; ok false if a factor is missing */
 export function toPcs(l, sku) {
   if (!l || (l.ctn == null && l.box == null && l.pcs == null)) return { qty: null, ok: true };

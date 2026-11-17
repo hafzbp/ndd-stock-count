@@ -5,7 +5,7 @@ html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui
 body.noscroll{overflow:hidden}
 button,input,select,textarea{font:inherit;color:inherit}
 header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-header .logo{height:30px;width:auto;border-radius:4px;background:#fff}
+header .logo{height:32px;width:auto;display:block}
 header h1{font-size:16px;margin:0}
 header .sub{font-size:12.5px;color:var(--mute)}
 .sp{flex:1}

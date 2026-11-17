@@ -22,7 +22,9 @@ rows = [
  ["1501","NDD Alpha","B2","Roll B 18g","MW00","Main","",100,50,0,0,0,0,0,0,0,0],
  ["1501","NDD Alpha","C3","Snack C 25g","MW00","Main","20261201",60,60,0,0,0,0,0,0,0,0],
  ["1501","NDD Alpha","A1","Wafer A 50g","BS00","Bad stock","20270315",9,18,0,0,0,0,0,0,0,0],
- ["1502","NDD Beta","A1","Wafer A 50g","MW00","Main","20270315",48,96,0,0,0,0,0,0,0,0]]
+ ["1502","NDD Beta","A1","Wafer A 50g","MW00","Main","20270315",48,96,0,0,0,0,0,0,0,0],
+ ["1503","NDD Gamma","A1","Wafer A 50g","MW00","Main","20270315",12,24,0,0,0,0,0,0,0,0],
+ ["1599","Factory DC","A1","Wafer A 50g","MW00","Main","20270315",7,14,0,0,0,0,0,0,0,0]]
 wb = Workbook(); ws = wb.active; ws.append(["MB52 export"]); ws.append(H)
 for r in rows: ws.append(r)
 wb.save(f"{OUT}/mb52.xlsx")
@@ -58,10 +60,13 @@ with sync_playwright() as p:
     check("team saved", ow.is_visible("text=Ali Rahman"))
     ow.locator(".card:has-text('Branch PINs') input").nth(0).fill("1234"); ow.locator(".card:has-text('Branch PINs') input").nth(1).fill("5678")
     ow.click("button:has-text(\"Save PINs\")"); ow.wait_for_selector("#sheet >> text=Send each branch its PIN"); ow.click("#sheet button:has-text(\"OK\")")
-    ow.set_input_files(".card:has-text('1. Upload SAP MB52') input[type=file]", f"{OUT}/mb52.xlsx"); ow.wait_for_selector("#sheet >> text=Load MB52?")
-    txt = ow.inner_text("#sheet"); check("MB52 summary shows 4 lines, bad stock excluded", "5 lines for 2 branch" in txt and "bad-stock locations BS/SH 9 PCS" in txt, txt[:300])
+    ow.set_input_files(".card:has-text('1. Upload SAP MB52') input[type=file]", f"{OUT}/mb52.xlsx"); ow.wait_for_selector("#sheet >> text=New branches in this MB52")
+    nb = ow.inner_text("#sheet"); check("MB52 offers new branch names, NDD ticked, DC not", "NDD Gamma" in nb and "Factory DC" in nb and ow.is_checked("#sheet label:has-text('NDD Gamma') input") and not ow.is_checked("#sheet label:has-text('Factory DC') input"), nb)
+    ow.click("#sheet button:has-text(\"Continue\")"); ow.wait_for_selector("#sheet >> text=Load MB52?")
+    txt = ow.inner_text("#sheet"); check("MB52 summary shows 4 lines, bad stock excluded", "6 lines for 3 branch" in txt and "SKIPPED (branch not in list): 1599 Factory DC" in txt and "bad-stock locations BS/SH 9 PCS" in txt, txt[:300])
     ow.click("#sheet button:has-text(\"Load\")"); ow.wait_for_selector("#sheet >> text=Next: Pcs per Carton", timeout=20000)
     ow.click("#sheet button:has-text(\"OK\")")
+    gpin = ow.locator(".card:has-text('Branch PINs') tr:has-text('NDD Gamma') input").input_value(); check("new branch got an automatic PIN", len(gpin) == 4 and gpin.isdigit(), gpin)
     ow.fill(".card:has-text('2. Pcs per Carton') textarea", "A1\t24\t\nB2\t50\t10\nC3\t12\t"); ow.click("button:has-text(\"Save factors\")"); ow.wait_for_selector("#sheet >> text=3 SKU(s) updated"); ow.click("#sheet button:has-text(\"OK\")")
     ow.set_input_files(".card:has-text('3. Barcode master') input[type=file]", f"{OUT}/barcodes.xlsx"); ow.wait_for_selector("#sheet >> text=Load barcodes?")
     t2 = ow.inner_text("#sheet"); check("barcode upload: 1 ok, BAG row skipped", "1 barcode(s) ready" in t2 and "1 row(s) skipped" in t2, t2)
@@ -137,6 +142,16 @@ with sync_playwright() as p:
     setpcs("A1", 53); setpcs("B2", 99)
     fn.fill(".sbox input", ""); fn.dispatch_event(".sbox input", "input"); fn.wait_for_timeout(1800)
     check("finance cannot see Ops numbers", "53" not in fn.inner_text(".banner") and "OPS COUNT" not in fn.inner_text("main"))
+
+    print("branch without a team list")
+    gm = phone(); gm.goto(BASE + "/?api=local"); gm.wait_for_selector("text=1. I am counting as"); gm.click(".big:has-text('Ops team counts')"); gm.click(".big:has-text('NDD Gamma')")
+    for d in gpin: gm.click(f"#sheet .pad button:text-is('{d}')")
+    gm.click("#sheet button:has-text(\"Unlock\")"); gm.wait_for_selector("input[placeholder='Type your name, then Add']")
+    check("no team list → name box shown straight away", True)
+    gm.fill("input[placeholder='Type your name, then Add']", "Rahim"); gm.press("input[placeholder='Type your name, then Add']", "Enter")
+    gm.click("button:has-text(\"Start ops count\")"); gm.wait_for_selector("text=OPS COUNT"); gm.click("#footIn button:text-is('⚙')"); gm.click("#sheet button:has-text('Switch person')")
+    gm.click(".big:has-text('Ops team counts')"); gm.click(".big:text-is('NDD Gamma')"); gm.wait_for_selector("text=3. Counter(s) - Operations")
+    check("typed name remembered on this phone", gm.is_visible(".big:has-text('Rahim')"))
 
     print("finance desk: master + recount + export")
     ow.click("#lockBtn"); ow.wait_for_selector("text=🔒 Finance")
