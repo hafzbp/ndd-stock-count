@@ -24,6 +24,7 @@ function render() {
   labelTables();
 }
 hooks.render = render;
+hooks.openLogin = function (first) { if (first) bootstrap(); else onLockBtn(); };
 hooks.needPin = function (br) { withPin(br, function () { flush(); render(); }); };
 
 function drawHeader() {

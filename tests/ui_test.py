@@ -45,9 +45,10 @@ with sync_playwright() as p:
         return pg
 
     print("owner setup (laptop)")
-    ow = phone(1280, 900); ow.goto(BASE + "/?api=local"); ow.wait_for_selector("text=No branches set up yet")
-    check("fresh app shows 'no branches'", True)
-    ow.click("#lockBtn"); ow.click("text=First time? Set the owner password")
+    ow = phone(1280, 900); ow.goto(BASE + "/?api=local"); ow.wait_for_selector("text=Welcome - first-time setup")
+    check("fresh app shows first-time setup guide", ow.inner_text("#pill") == "Online", ow.inner_text("#pill"))
+    ow.screenshot(path=f"{OUT}/first_run.png")
+    ow.click("button:has-text('Start first-time setup')")
     ow.fill("input[placeholder='Setup code']", "SETUP-123"); ow.fill("input[placeholder^='New owner password']", "OwnerPass1"); ow.fill("input[placeholder='Repeat password']", "OwnerPass1")
     ow.click("#sheet button:has-text(\"Save\")"); ow.wait_for_selector("text=Owner password set")
     ow.click("#sheet button:has-text(\"OK\")"); check("owner bootstrap → Setup tab", ow.is_visible("text=1. Upload SAP MB52"))

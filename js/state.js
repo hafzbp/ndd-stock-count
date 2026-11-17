@@ -18,7 +18,7 @@ export var S = {
   adm: null, mBranch: "", mOnly: true
 };
 
-export var hooks = { render: function () { }, renderCountOnly: function () { }, needPin: null };
+export var hooks = { render: function () { }, renderCountOnly: function () { }, needPin: null, openLogin: null };
 
 function ls(k, v) {
   try { if (v === undefined) { var x = localStorage.getItem(k); return x ? JSON.parse(x) : null; } if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) { return null; }
@@ -142,6 +142,7 @@ export function syncPill() {
   if (S.saveErr === "PIN") return pill("PIN needed to save", "bad");
   if (S.saveErr) return pill("Offline - kept on phone", "warn");
   if (S.saving || anyDirty()) return pill("Saving…");
+  if (!Object.keys(S.mine.sessions).length) return pill("Online", "ok");
   pill("All saved ✓", "ok");
 }
 
