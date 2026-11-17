@@ -37,7 +37,7 @@ export function mb52Card(title, onDone) {
       var rows = await readSheet(file);
       var known = {}, ign = ((S.adm.settings || {}).x_ignore_branches || []);
       (S.adm.branches || []).forEach(function (b) { if (b.active) known[b.name] = 1; }); ign.forEach(function (n) { known[n] = 1; });
-      var names = mb52Names(rows), fresh = names.filter(function (x) { return !known[x.name]; });
+      var names = mb52Names(rows, Object.keys(known)), fresh = names.filter(function (x) { return !x.known; });
       if (fresh.length) {
         var add = await askNewBranches(fresh);
         if (add === null) { f.value = ""; return; }
@@ -46,16 +46,16 @@ export function mb52Card(title, onDone) {
         if (skipNow.length) await rpc("admin_settings", { p_token: tok(), p_patch: { x_ignore_branches: ign.concat(skipNow) } });
         await loadAdmin();
       }
-      var res = parseMB52(rows, branchesAdm()), plants = {};
-      names.forEach(function (x) { if (res.byBr[x.name]) (plants[x.name] = plants[x.name] || []).push(x.plant); });
+      var res = parseMB52(rows, branchesAdm()), plants = res.plants;
       var skip = Object.keys(res.skipped).map(function (k) { return k + " RM" + fmt(res.skipped[k], 2); }).join(", ");
       var ti = S.adm.takeInfo || {}, picked = ti.scope === "partial" ? (ti.skus || []) : null, inFile = {};
       Object.keys(res.byBr).forEach(function (b) { res.byBr[b].forEach(function (r) { inFile[r[0]] = 1; }); });
       var missingPicked = picked ? picked.filter(function (c0) { return !inFile[c0]; }) : [];
-      confirmBox("Load MB52?", res.lines + " lines for " + Object.keys(res.byBr).length + " branch(es). Qty " + fmt(res.totQ, 0) + " PCS, RM " + fmt(res.totV, 2) + "." +
+      confirmBox("Load MB52?", res.lines + " lines for " + Object.keys(res.byBr).length + " branch(es). Qty " + fmt(res.totQ, 0) + " PCS" + (res.hasValue ? ", RM " + fmt(res.totV, 2) : "") + "." +
         (skip ? "\nSKIPPED (branch not in list): " + skip : "") + (res.badBatches.length ? "\n" + res.badBatches.length + " batch value(s) not readable as dates: " + res.badBatches.slice(0, 8).join(", ") : "") +
-        (res.transit ? "\nStock in transit left out: " + fmt(res.transit, 0) + " PCS" : "") + "\nGood stock only. Left out: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" +
+        (res.transit ? "\nStock in transit left out: " + fmt(res.transit, 0) + " PCS" : "") + (res.format === "mb52" ? "\nGood stock only. Left out: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" : "") +
         (missingPicked.length ? "\n\n" + missingPicked.length + " picked SKU(s) are not in this MB52 at any branch: " + missingPicked.slice(0, 8).join(", ") : "") +
+        (res.format === "report" ? "\n\nStock report format (SKU / Total in PCS). " + (res.hasValue ? "" : "It has no RM values, so variance shows in PCS only.") : "") +
         "\n\nReplaces system stock for these branches.", "Load", async function () {
           var skV = 0; Object.keys(res.skipped).forEach(function (k) { skV += res.skipped[k]; });
           pill("Loading MB52…");

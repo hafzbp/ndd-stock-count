@@ -20,52 +20,78 @@ export function monthOf(b) { b = b == null ? "" : String(b); return isDateB(b) ?
 export function isMonthB(b) { return /^\d{4}-\d{2}$/.test(b); }
 export function numv(v) { if (typeof v === "number") return v; var s = String(v == null ? "" : v).replace(/,/g, "").trim(); if (!s) return 0; if (/-$/.test(s)) s = "-" + s.slice(0, -1); var n = Number(s); return isNaN(n) ? 0 : n; }
 
-/** rows: array of arrays incl. header (MB52 non-hierarchical, batch stocks). branches: valid branch names. */
+/* Column names accepted for each field (case and spaces don't matter). Two layouts work:
+   SAP MB52 (Material, Name 1, Unrestricted, values...) and the stock report (SKU, PLANT DISCRIPTION, Total in PCS). */
+var COLS = {
+  plant: ["Plant"], name: ["Name 1", "Plant Discription", "Plant Description", "Plant Name"],
+  material: ["Material", "SKU", "Material Number", "Item Code"], desc: ["Material Description", "Description"],
+  sloc: ["Storage Location", "Storage Loc.", "SLoc"], slocDesc: ["Descr. of Storage Loc."], batch: ["Batch"],
+  unr: ["Unrestricted"], rst: ["Restricted-Use Stock"], qi: ["Quality Inspection"], pcs: ["Total in PCS", "Total PCS", "Qty in PCS", "Quantity"],
+  vUnr: ["Value Unrestricted"], vRst: ["Value Restricted"], vQi: ["Value in QualInsp."], blk: ["Blocked Stock"], vBlk: ["Value BlockedStock"],
+  transit: ["Stock in Transit"], vTransit: ["Value in Transit"]
+};
+function normH(x) { return String(x == null ? "" : x).trim().toLowerCase().replace(/\s+/g, " "); }
+function findHeader(rows) {
+  for (var i = 0; i < Math.min(rows.length, 30); i++) {
+    var h = rows[i].map(normH);
+    if (h.indexOf("plant") >= 0 && COLS.material.some(function (m) { return h.indexOf(normH(m)) >= 0; })) {
+      var col = {}; Object.keys(COLS).forEach(function (k) { col[k] = -1; COLS[k].some(function (n) { var j = h.indexOf(normH(n)); if (j >= 0) { col[k] = j; return true; } return false; }); });
+      return { row: i, col: col };
+    }
+  }
+  return null;
+}
+function canon(branches) { var m = {}; branches.forEach(function (b) { m[normH(b)] = b; }); return m; }
+
+/** rows: array of arrays incl. header. branches: valid branch names (matched ignoring case/spaces). */
 export function parseMB52(rows, branches) {
-  var hr = -1; for (var i = 0; i < Math.min(rows.length, 30); i++) { var h = rows[i].map(function (x) { return String(x == null ? "" : x).trim(); }); if (h.indexOf("Plant") >= 0 && h.indexOf("Material") >= 0) { hr = i; break; } }
-  if (hr < 0) throw new Error('No header row with "Plant" and "Material".');
-  var H = rows[hr].map(function (x) { return String(x == null ? "" : x).trim(); }), col = function (n) { return H.indexOf(n); };
-  ["Plant", "Material", "Batch", "Unrestricted"].forEach(function (n) { if (col(n) < 0) throw new Error('Missing column "' + n + '". Run MB52 with Display Batch Stocks ticked + Non-Hierarchical.'); });
+  var hd = findHeader(rows);
+  if (!hd) throw new Error('No header row with "Plant" and "Material" (or "SKU").');
+  var c = hd.col, hr = hd.row, mb52 = c.unr >= 0;
+  if (c.batch < 0) throw new Error('Missing column "Batch".');
+  if (!mb52 && c.pcs < 0) throw new Error('Missing a quantity column: "Unrestricted" (SAP MB52) or "Total in PCS" (stock report).');
+  function v(row, k) { return c[k] >= 0 ? row[c[k]] : ""; }
   /* GOOD stock only: Blocked Stock column and bad-stock locations (BS*, SH*, "Bad"/"Dmg") are excluded */
-  var qc = ["Unrestricted", "Restricted-Use Stock", "Quality Inspection"].map(col), vc = ["Value Unrestricted", "Value Restricted", "Value in QualInsp."].map(col);
-  var bqc = col("Blocked Stock"), bvc = col("Value BlockedStock"), exQ = 0, exV = 0, exB = 0, exBV = 0, trV = 0;
+  var exQ = 0, exV = 0, exB = 0, exBV = 0, trV = 0;
   function badLoc(sl, ds) { return /^(BS|SH)/i.test(sl) || /bad|dmg|damage|shtg/i.test(ds); }
-  var brSet = {}; branches.forEach(function (b) { brSet[b] = 1; });
-  var agg = {}, descs = {}, skipped = {}, bad = {}, transit = 0, n = 0;
+  var brMap = canon(branches);
+  var agg = {}, descs = {}, skipped = {}, bad = {}, transit = 0, n = 0, plants = {};
   for (var r = hr + 1; r < rows.length; r++) {
     var row = rows[r];
-    var plant = String(row[col("Plant")] || "").trim(), mat = String(row[col("Material")] || "").trim(); if (!plant || !mat) continue;
-    var name = col("Name 1") >= 0 ? String(row[col("Name 1")] || "").trim() : "";
-    if (col("Material Description") >= 0 && row[col("Material Description")]) descs[mat] = String(row[col("Material Description")]).trim();
-    if (col("Stock in Transit") >= 0) transit += numv(row[col("Stock in Transit")]); if (col("Value in Transit") >= 0) trV += numv(row[col("Value in Transit")]);
-    var q = 0, v = 0; qc.forEach(function (c) { if (c >= 0) q += numv(row[c]); }); vc.forEach(function (c) { if (c >= 0) v += numv(row[c]); });
-    if (bqc >= 0) { exB += numv(row[bqc]); exBV += bvc >= 0 ? numv(row[bvc]) : 0; }
-    var slc = col("Storage Location") >= 0 ? String(row[col("Storage Location")] || "").trim() : "", sld = col("Descr. of Storage Loc.") >= 0 ? String(row[col("Descr. of Storage Loc.")] || "") : "";
-    if (badLoc(slc, sld)) { exQ += q; exV += v; continue; }
+    var plant = String(v(row, "plant") || "").trim().replace(/\.0$/, ""), mat = String(v(row, "material") || "").trim().replace(/\.0$/, ""); if (!plant || !mat) continue;
+    var raw = String(v(row, "name") || "").trim(), name = brMap[normH(raw)] || raw;
+    if (v(row, "desc")) descs[mat] = String(v(row, "desc")).trim();
+    transit += numv(v(row, "transit")); trV += numv(v(row, "vTransit"));
+    var q = mb52 ? numv(v(row, "unr")) + numv(v(row, "rst")) + numv(v(row, "qi")) : numv(v(row, "pcs"));
+    var val = numv(v(row, "vUnr")) + numv(v(row, "vRst")) + numv(v(row, "vQi"));
+    exB += numv(v(row, "blk")); exBV += numv(v(row, "vBlk"));
+    var slc = String(v(row, "sloc") || "").trim(), sld = String(v(row, "slocDesc") || "");
+    if (badLoc(slc, sld)) { exQ += q; exV += val; continue; }
     if (!q) continue;
-    if (!brSet[name]) { var k0 = plant + (name ? " " + name : ""); skipped[k0] = (skipped[k0] || 0) + v; continue; }
-    var rb = row[col("Batch")], b = monthOf(normBatch(rb)); if (b && !isMonthB(b)) bad[b] = 1;
+    if (!brMap[normH(raw)]) { var k0 = plant + (raw ? " " + raw : ""); skipped[k0] = (skipped[k0] || 0) + val; continue; }
+    (plants[name] = plants[name] || {})[plant] = 1;
+    var b = monthOf(normBatch(v(row, "batch"))); if (b && !isMonthB(b)) bad[b] = 1;
     var key = name + "|" + mat + "|" + b, A = agg[key] || (agg[key] = { br: name, code: mat, b: b, q: 0, v: 0, sl: {} });
-    A.q += q; A.v += v; n++; var sl = col("Storage Location") >= 0 ? String(row[col("Storage Location")] || "").trim() : ""; if (sl) A.sl[sl] = 1;
+    A.q += q; A.v += val; n++; if (slc) A.sl[slc] = 1;
   }
   var byBr = {}; Object.keys(agg).forEach(function (k) { var A = agg[k]; (byBr[A.br] = byBr[A.br] || []).push([A.code, A.b, Math.round(A.q * 1000) / 1000, A.q ? Math.round(A.v / A.q * 1e6) / 1e6 : 0, Object.keys(A.sl).sort().join(",")]); });
   Object.keys(byBr).forEach(function (b) { byBr[b].sort(function (x, y) { return (x[0] + x[1]).localeCompare(y[0] + y[1]); }); });
   var totQ = 0, totV = 0; Object.keys(agg).forEach(function (k) { totQ += agg[k].q; totV += agg[k].v; });
-  return { trV: trV, exBadQ: exQ, exBadV: exV, exBlkQ: exB, exBlkV: exBV, byBr: byBr, descs: descs, skipped: skipped, badBatches: Object.keys(bad), transit: transit, rowsUsed: n, lines: Object.keys(agg).length, totQ: totQ, totV: totV };
+  var pl = {}; Object.keys(plants).forEach(function (b) { pl[b] = Object.keys(plants[b]).sort(); });
+  return { format: mb52 ? "mb52" : "report", hasValue: c.vUnr >= 0, trV: trV, exBadQ: exQ, exBadV: exV, exBlkQ: exB, exBlkV: exBV, byBr: byBr, descs: descs, skipped: skipped, plants: pl,
+    badBatches: Object.keys(bad), transit: transit, rowsUsed: n, lines: Object.keys(agg).length, totQ: totQ, totV: totV };
 }
 
-/** Distinct "Name 1" values (branch names) in an MB52 sheet, with their plant. */
-export function mb52Names(rows) {
-  for (var i = 0; i < Math.min(rows.length, 30); i++) {
-    var h = rows[i].map(function (x) { return String(x == null ? "" : x).trim(); });
-    if (h.indexOf("Plant") >= 0 && h.indexOf("Material") >= 0) {
-      var pc = h.indexOf("Plant"), nc = h.indexOf("Name 1"), out = {};
-      if (nc < 0) return [];
-      for (var r = i + 1; r < rows.length; r++) { var n = String(rows[r][nc] || "").trim(), p = String(rows[r][pc] || "").trim(); if (n && !out[n]) out[n] = p; }
-      return Object.keys(out).sort().map(function (n) { return { name: n, plant: out[n] }; });
-    }
+/** Distinct branch names (Name 1 / PLANT DISCRIPTION) in the file with their plant, matched to known branches ignoring case. */
+export function mb52Names(rows, branches) {
+  var hd = findHeader(rows); if (!hd || hd.col.name < 0) return [];
+  var m = canon(branches || []), out = {};
+  for (var r = hd.row + 1; r < rows.length; r++) {
+    var raw = String(rows[r][hd.col.name] || "").trim(), p = String(rows[r][hd.col.plant] || "").trim().replace(/\.0$/, "");
+    if (!raw) continue; var n = m[normH(raw)] || raw;
+    if (!out[n]) out[n] = { name: n, plant: p, known: !!m[normH(raw)] };
   }
-  return [];
+  return Object.keys(out).sort().map(function (k) { return out[k]; });
 }
 
 /** PCS from carton/box/pieces. returns {qty, ok} - qty null if nothing entered; ok false if a factor is missing */

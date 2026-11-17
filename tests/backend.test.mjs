@@ -200,6 +200,25 @@ await t("can't open a partial with no SKUs", async () => {
   await rejects(rpc("admin_set_status", { p_token: ADM, p_status: "open" }), /MB52|Pick at least/);
 });
 
+console.log("stock report layout (SKU / Total in PCS)");
+await t("report layout parses: names matched ignoring case, plants, total row ignored, dd.mm.yyyy batches", async () => {
+  const R = [["Plant", "PLANT DISCRIPTION", "Storage Loc.", "Batch", "Exp. date", "Manu. date", "SKU", "Description", "High(CTN)", "Total in PCS"],
+    ["1501", "NDD ALPHA", "MW00", "20270903", "", "", "A1", "Wafer A", 24, 738],
+    ["1501", "NDD ALPHA", "MW00", "20270915", "", "", "A1", "Wafer A", 1, 30],
+    ["1511", "ndd beta ", "NDD Beta", "01.02.2027", "", "", "B2", "Roll B", 3, 119],
+    ["1599", "Factory DC", "MW00", "20270101", "", "", "A1", "Wafer A", 1, 10],
+    ["", "", "", "", "", "", "", "", 29, 897]];
+  const r = parseMB52(R, ["NDD Alpha", "NDD Beta"]);
+  assert.equal(r.format, "report"); assert.equal(r.hasValue, false);
+  assert.deepEqual(r.byBr["NDD Alpha"], [["A1", "2027-09", 768, 0, "MW00"]]);
+  assert.deepEqual(r.byBr["NDD Beta"], [["B2", "2027-02", 119, 0, "NDD Beta"]]);
+  assert.deepEqual(r.plants, { "NDD Alpha": ["1501"], "NDD Beta": ["1511"] });
+  assert.ok(r.skipped["1599 Factory DC"] !== undefined); assert.equal(r.totQ, 887);
+});
+await t("MB52 layout still the same (Unrestricted + Restricted + QI, values)", async () => {
+  const r = parseMB52(rows, ["NDD Alpha", "NDD Beta"]); assert.equal(r.format, "mb52"); assert.equal(r.hasValue, true); assert.equal(r.exBadQ, 99); assert.equal(r.lines, 7);
+});
+
 console.log("owner tools");
 await t("adding a known branch adds nothing", async () => {
   assert.equal(await rpc("admin_add_branches", { p_token: OWNER, p_branches: ["NDD Delta", "NDD Alpha"] }), 1);
