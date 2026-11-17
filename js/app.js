@@ -39,7 +39,7 @@ function drawHeader() {
     });
   } else { tabs.classList.add("hidden"); S.tab = "count"; }
   var lk = $("#lockBtn");
-  lk.textContent = isAdmin() ? "🔓 Log out" : "🔒 Admin";
+  lk.replaceChildren(isAdmin() ? "🔓" : "🔒", el("span", { class: "lbl", text: isAdmin() ? " Log out" : " Admin" })); lk.title = isAdmin() ? "Log out" : "Admin login";
 }
 function adminErr(e) {
   if (e && e.code === "AUTH") { S.admin = null; saveTokens(); S.tab = "count"; render(); msg("Signed out", "Your admin login expired or the password was changed. Log in again."); }
@@ -131,6 +131,7 @@ async function tick() {
 
 async function init() {
   $("#lockBtn").addEventListener("click", onLockBtn);
+  if (/[?&]api=/.test(location.search)) $("#dashBtn").href = "dashboard/" + location.search;
   $("#modal").addEventListener("click", function (e) { if (e.target.id === "modal") closeModal(); });
   loadLocal();
   try { var c = localStorage.getItem("ndd2-cfg"); if (c) S.cfg = JSON.parse(c); } catch (e) { }
