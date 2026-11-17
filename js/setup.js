@@ -23,13 +23,63 @@ function readSheet(file) {
     rd.readAsArrayBuffer(file);
   });
 }
+
+/* MB52 upload card (used by the stock take wizard and when replacing the MB52 of an open stock take). */
+export function mb52Card(title, onDone) {
+  var A = S.adm, f = el("input", { type: "file", accept: ".xlsx,.xls,.csv" });
+  var sysTxt = Object.keys(S.sysBy || {}).length ? Object.keys(S.sysBy).length + " branch(es) loaded" + (A.meta ? " · uploaded " + tsTxt(A.meta.loadedAt) : "") : "Nothing uploaded yet";
+  var c = el("div", { class: "card" }, el("h3", { text: title }),
+    el("p", { class: "small muted", text: "SAP MB52: Plant 1501-1515, tick Display Batch Stocks + No zero stock lines, Non-Hierarchical, Export → Spreadsheet. The branch comes from “Name 1” and its plant code becomes the counters' login. GOOD stock only: Blocked Stock, bad-stock locations (BS00/BS01/SH00) and Stock in Transit are left out." }), f,
+    el("p", { class: "small", style: "margin-top:8px;font-weight:600", text: sysTxt }));
+  f.addEventListener("change", async function () {
+    var file = f.files[0]; if (!file) return;
+    try {
+      var rows = await readSheet(file);
+      var known = {}, ign = ((S.adm.settings || {}).x_ignore_branches || []);
+      (S.adm.branches || []).forEach(function (b) { if (b.active) known[b.name] = 1; }); ign.forEach(function (n) { known[n] = 1; });
+      var names = mb52Names(rows), fresh = names.filter(function (x) { return !known[x.name]; });
+      if (fresh.length) {
+        var add = await askNewBranches(fresh);
+        if (add === null) { f.value = ""; return; }
+        if (add.length) await rpc("admin_add_branches", { p_token: tok(), p_branches: add });
+        var skipNow = fresh.map(function (x) { return x.name; }).filter(function (n) { return add.indexOf(n) < 0; });
+        if (skipNow.length) await rpc("admin_settings", { p_token: tok(), p_patch: { x_ignore_branches: ign.concat(skipNow) } });
+        await loadAdmin();
+      }
+      var res = parseMB52(rows, branchesAdm()), plants = {};
+      names.forEach(function (x) { if (res.byBr[x.name]) (plants[x.name] = plants[x.name] || []).push(x.plant); });
+      var skip = Object.keys(res.skipped).map(function (k) { return k + " RM" + fmt(res.skipped[k], 2); }).join(", ");
+      var ti = S.adm.takeInfo || {}, picked = ti.scope === "partial" ? (ti.skus || []) : null, inFile = {};
+      Object.keys(res.byBr).forEach(function (b) { res.byBr[b].forEach(function (r) { inFile[r[0]] = 1; }); });
+      var missingPicked = picked ? picked.filter(function (c0) { return !inFile[c0]; }) : [];
+      confirmBox("Load MB52?", res.lines + " lines for " + Object.keys(res.byBr).length + " branch(es). Qty " + fmt(res.totQ, 0) + " PCS, RM " + fmt(res.totV, 2) + "." +
+        (skip ? "\nSKIPPED (branch not in list): " + skip : "") + (res.badBatches.length ? "\n" + res.badBatches.length + " batch value(s) not readable as dates: " + res.badBatches.slice(0, 8).join(", ") : "") +
+        (res.transit ? "\nStock in transit left out: " + fmt(res.transit, 0) + " PCS" : "") + "\nGood stock only. Left out: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" +
+        (missingPicked.length ? "\n\n" + missingPicked.length + " picked SKU(s) are not in this MB52 at any branch: " + missingPicked.slice(0, 8).join(", ") : "") +
+        "\n\nReplaces system stock for these branches.", "Load", async function () {
+          var skV = 0; Object.keys(res.skipped).forEach(function (k) { skV += res.skipped[k]; });
+          pill("Loading MB52…");
+          try {
+            await rpc("admin_load_mb52", { p_token: tok(), p_payload: { meta: { goodV: res.totV, goodQ: res.totQ, blockedV: res.exBlkV, badLocV: res.exBadV, transitV: res.trV, skippedV: skV, skipped: Object.keys(res.skipped), lines: res.lines }, byBr: res.byBr, descs: res.descs, plants: plants } });
+            await loadAdmin(); pill("Online", "ok");
+            var noFac = (S.adm.skus || []).filter(function (s0) { return inFile[s0.code] && !s0.per; }).map(function (s0) { return s0.code; });
+            msg("MB52 loaded", Object.keys(res.byBr).length + " branch(es), plant codes ready for counter login." + (noFac.length ? "\n\n" + noFac.length + " SKU(s) have no pcs per carton yet (" + noFac.slice(0, 6).join(", ") + (noFac.length > 6 ? "…" : "") + "). Add them in Settings → Pcs per Carton / Box, or counters can only count those in pieces." : ""));
+            onDone && onDone();
+          } catch (e) { pill("Error", "bad"); msg("Load failed", errText(e)); }
+        });
+    } catch (e) { msg("Can't read file", errText(e)); }
+    f.value = "";
+  });
+  return c;
+}
+
 /* MB52 has branch names the app doesn't know yet: tick the ones to add. Resolves to [names] or null (cancel). */
 function askNewBranches(list) {
   return new Promise(function (done) {
     openModal(function (sh) {
       var boxes = list.map(function (x) { var cb = el("input", { type: "checkbox", checked: /^NDD/i.test(x.name) }); cb._n = x.name; return cb; });
       sh.append(el("h3", { text: "New branches in this MB52" }),
-        el("p", { class: "small muted", text: "These “Name 1” values are not in the app yet. Tick the ones that are NDD warehouses to count - each gets a PIN automatically. Unticked ones are skipped (not counted)." }),
+        el("p", { class: "small muted", text: "These “Name 1” values are not in the app yet. Tick the ones that are NDD warehouses to count - their plant code becomes the counters' login. Unticked ones are skipped and won't be asked about again." }),
         el("div", { style: "max-height:50vh;overflow:auto;margin:8px 0" }, list.map(function (x, i) { return el("label", { class: "row", style: "gap:8px;padding:6px 0;border-bottom:1px solid var(--line)" }, boxes[i], el("span", { text: x.name }), el("span", { class: "small muted", text: "plant " + x.plant })); })),
         el("div", { class: "row", style: "margin-top:12px" },
           el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: function () { closeModal(); done(null); } }),
@@ -43,44 +93,12 @@ function card(title, sub) { var c = el("div", { class: "card" }, el("h3", { text
 export function renderSetup(app) {
   if (!S.adm) { app.append(el("p", { class: "center muted", text: "Loading…" })); loadAdmin().then(hooks.render); return; }
   var A = S.adm, st = A.settings || {}, tk = currentTake();
-  app.append(el("div", { class: "banner warn", text: "Finance only. Counters never see system quantities. Stock take: " + (tk.name || "-") + (tk.closed ? " (closed)" : "") }));
-
-  /* 1. MB52 */
-  var f = el("input", { type: "file", accept: ".xlsx,.xls,.csv" });
-  var sysTxt = Object.keys(S.sysBy).map(function (b) { return b + " (" + S.sysBy[b].length + ")"; }).join(", ") || "none yet";
-  app.append(el("div", { class: "card" }, el("h3", { text: "1. Upload SAP MB52 (.xlsx)" }),
-    el("p", { class: "small muted", text: "MB52: Plant 1501-1515, tick Display Batch Stocks + No zero stock lines, Non-Hierarchical. Export → Spreadsheet. Branch comes from SAP 'Name 1' (must match the branch list). GOOD stock only: Blocked Stock, bad-stock locations (BS00/BS01/SH00) and Stock in Transit are excluded." }), f,
-    el("p", { class: "small muted", text: "Loaded for: " + sysTxt + (A.meta ? " · uploaded " + tsTxt(A.meta.loadedAt) : "") })));
-  f.addEventListener("change", async function () {
-    var file = f.files[0]; if (!file) return;
-    try {
-      var rows = await readSheet(file);
-      var known = {}; (A.branches || []).forEach(function (b) { if (b.active) known[b.name] = 1; });
-      var fresh = mb52Names(rows).filter(function (x) { return !known[x.name]; });
-      if (fresh.length) {
-        var add = await askNewBranches(fresh);
-        if (add === null) { f.value = ""; return; }
-        if (add.length) { await rpc("admin_add_branches", { p_token: tok(), p_branches: add }); await loadAdmin(); }
-      }
-      var res = parseMB52(rows, branchesAdm());
-      var skip = Object.keys(res.skipped).map(function (k) { return k + " RM" + fmt(res.skipped[k], 2); }).join(", ");
-      confirmBox("Load MB52?", res.lines + " lines for " + Object.keys(res.byBr).length + " branch(es). Qty " + fmt(res.totQ, 0) + " PCS, RM " + fmt(res.totV, 2) + "." +
-        (skip ? "\nSKIPPED (branch not in list): " + skip : "") + (res.badBatches.length ? "\n" + res.badBatches.length + " batch value(s) not readable as dates: " + res.badBatches.slice(0, 8).join(", ") : "") +
-        (res.transit ? "\nStock in transit excluded: " + fmt(res.transit, 0) + " PCS" : "") + "\nGood stock only. Excluded: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" + "\n\nReplaces system stock for these branches.", "Load", async function () {
-          var skV = 0; Object.keys(res.skipped).forEach(function (k) { skV += res.skipped[k]; });
-          pill("Loading MB52…");
-          await call("admin_load_mb52", { p_payload: { meta: { goodV: res.totV, goodQ: res.totQ, blockedV: res.exBlkV, badLocV: res.exBadV, transitV: res.trV, skippedV: skV, skipped: Object.keys(res.skipped), lines: res.lines }, byBr: res.byBr, descs: res.descs } },
-            Object.keys(res.byBr).length + " branch(es). Next: Pcs per Carton / Box.");
-          pill("Online", "ok");
-        });
-    } catch (e) { msg("Can't read file", errText(e)); }
-    f.value = "";
-  });
+  app.append(el("div", { class: "banner warn", text: "Admin only. Settings that stay the same between stock takes. Counters never see system quantities." }));
 
   /* 2. factors */
   var fa = el("textarea", { placeholder: "Item Code\tPcs per CTN\tPcs per BOX\n650505\t240\t24" });
   var missing = (A.skus || []).filter(function (s) { return !s.per; }).length;
-  app.append(el("div", { class: "card" }, el("h3", { text: "2. Pcs per Carton / Box" }),
+  app.append(el("div", { class: "card" }, el("h3", { text: "Pcs per Carton / Box" }),
     el("p", { class: "small muted", text: "Paste from Excel: Item Code | Pcs per CTN | Pcs per BOX. " + missing + " of " + (A.skus || []).length + " SKUs have no Pcs per CTN yet. Without it, cartons can't be converted to PCS for variance." }), fa,
     el("div", { class: "row", style: "justify-content:flex-end;margin-top:8px" }, el("button", { class: "btn primary", text: "Save factors", onclick: function () {
       var items = [], known = {}; (A.skus || []).forEach(function (s) { known[s.code] = 1; }); var unk = [];
@@ -96,7 +114,7 @@ export function renderSetup(app) {
   var bf = el("input", { type: "file", accept: ".xlsx,.xls,.csv" }), rep = el("input", { type: "checkbox" });
   var sugg = {}; (S.counts || []).forEach(function (d) { Object.keys(d.unknownBarcodes || {}).forEach(function (bc) { var c = d.unknownBarcodes[bc]; (sugg[bc] = sugg[bc] || {})[c] = (sugg[bc][c] || 0) + 1; }); });
   var sk = Object.keys(sugg);
-  var bcCard = el("div", { class: "card" }, el("h3", { text: "3. Barcode master" }),
+  var bcCard = el("div", { class: "card" }, el("h3", { text: "Barcode master" }),
     el("p", { class: "small muted", text: A.barcodeCount + " barcode(s) loaded. Upload Excel/CSV with columns: Barcode | Item Code | UoM (PCS, BOX or CTN). Format the Barcode column as Text in Excel so long numbers aren't cut. One SKU can have several barcodes (e.g. piece and carton)." }),
     bf, el("label", { class: "row small", style: "gap:6px;margin-top:8px" }, rep, "Replace the whole list (otherwise add / update)"));
   bf.addEventListener("change", async function () {
@@ -149,40 +167,33 @@ export function renderSetup(app) {
 
   /* dashboard */
   var dashUrl = new URL("dashboard/", location.href.replace(/[#?].*$/, "").replace(/[^/]*$/, "")).href;
-  var lv = el("select", { style: "max-width:360px" }, [["progress", "Progress only"], ["qty", "Progress + variance in PCS (after counting is closed)"], ["value", "Progress + variance in PCS and RM (after counting is closed)"]].map(function (o) { return el("option", { value: o[0], text: o[1], selected: (st.dash_level || "progress") === o[0] }); }));
+  var lv = el("select", { style: "max-width:360px" }, [["progress", "Progress only"], ["qty", "Progress + variance in PCS (after closing)"], ["value", "Progress + variance in PCS and RM (after closing)"]].map(function (o) { return el("option", { value: o[0], text: o[1], selected: (st.dash_level || "progress") === o[0] }); }));
   app.append(el("div", { class: "card" }, el("h3", { text: "Public dashboard" }),
-    el("p", { class: "small muted", text: "Anyone with the link can see it, no login. Variance only appears after you close counting. Change the level any time - the dashboard follows within 30 seconds." }),
+    el("p", { class: "small muted", text: "Anyone with the link can see it, no login. Variance only appears after you close the stock take. Change the level any time - the dashboard follows within 30 seconds." }),
     el("div", { class: "row" }, lv, el("button", { class: "btn primary", text: "Save", onclick: function () { call("admin_settings", { p_patch: { dash_level: lv.value } }, "Dashboard level saved."); } })),
     el("p", { class: "small", style: "margin-top:8px" }, "Link: ", el("a", { href: dashUrl, target: "_blank", rel: "noopener", text: dashUrl }))));
 
-  /* PINs */
-  var inputs = {}, pt = el("table", {}, el("tr", {}, el("th", { text: "Branch" }), el("th", { text: "PIN" })));
-  (A.branches || []).filter(function (b) { return b.active; }).forEach(function (b) { var i = el("input", { type: "text", inputmode: "numeric", maxlength: "6", value: b.pin || "", style: "max-width:120px;padding:6px 10px" }); inputs[b.name] = i; pt.append(el("tr", {}, el("td", { text: b.name }), el("td", {}, i))); });
-  app.append(el("div", { class: "card" }, el("h3", { text: "Branch PINs" }),
-    el("p", { class: "small muted", text: "Counters enter their branch PIN to start or continue a count. Changing a PIN logs that branch's phones out. Blank = no PIN for that branch." }),
-    el("div", { class: "tw keep" }, pt),
-    el("div", { class: "row", style: "justify-content:flex-end;margin-top:8px" },
-      el("button", { class: "btn", text: "Generate new PINs", onclick: function () { var used = {}; Object.keys(inputs).forEach(function (b) { var p; do { p = String(1000 + Math.floor(Math.random() * 9000)); } while (used[p]); used[p] = 1; inputs[b].value = p; }); } }),
-      el("button", { class: "btn primary", text: "Save PINs", onclick: function () {
-        var np = {}, bad = []; Object.keys(inputs).forEach(function (b) { var v = inputs[b].value.trim(); if (v && !/^\d{4,6}$/.test(v)) bad.push(b); np[b] = v; });
-        if (bad.length) { msg("PIN must be 4-6 digits", bad.join(", ")); return; }
-        call("admin_save_pins", { p_pins: np }, "Send each branch its PIN.");
-      } }))));
+  /* branches + plant codes (read-only: they come from the MB52) */
+  var pt = el("table", {}, el("tr", {}, el("th", { text: "Warehouse" }), el("th", { text: "Plant code (counter login)" })));
+  (A.branches || []).filter(function (b) { return b.active; }).forEach(function (b) { pt.append(el("tr", {}, el("td", { text: b.name }), el("td", { text: (b.plants || []).join(", ") || "set by the next MB52 upload" }))); });
+  app.append(el("div", { class: "card" }, el("h3", { text: "Warehouses and plant codes" }),
+    el("p", { class: "small muted", text: "Counters log in with their warehouse's SAP plant code. Codes come from the MB52 upload (Plant + Name 1)." }),
+    el("div", { class: "tw keep" }, pt)));
 
   renderTeam(app);
 
   /* owner only */
-  if (!isOwner()) { app.append(el("p", { class: "small muted center", text: "Passwords, stock takes and backup are managed by the owner." })); return; }
+  if (!isOwner()) { app.append(el("p", { class: "small muted center", text: "Passwords and backup are managed by the owner." })); return; }
   var title = el("input", { type: "text", value: st.title || "NDD Stock Count", style: "max-width:320px" });
   app.append(el("div", { class: "card" }, el("h3", { text: "App name" }), el("div", { class: "row" }, title, el("button", { class: "btn primary", text: "Save", onclick: function () { var v = title.value.trim(); if (!v) return; call("admin_settings", { p_patch: { title: v } }, "Name saved."); } }))));
 
   var fp = el("input", { type: "text", placeholder: A.financeReady ? "•••••• (set - type a new one to change)" : "not set", style: "max-width:260px", autocomplete: "off" });
-  app.append(el("div", { class: "card" }, el("h3", { text: "Finance password (Master & Setup access)" }),
-    el("p", { class: "small muted", text: "Finance staff tap 🔒 Finance and enter this. Changing it logs out everyone who used the old one. Stored only as a hash - nobody can read it back, so note it before saving. Blank + Save = turn off Finance access." }),
+  app.append(el("div", { class: "card" }, el("h3", { text: "Admin password" }),
+    el("p", { class: "small muted", text: "For other admins (for example Finance HQ): they tap 🔒 Admin and enter this. They can run stock takes but can't change passwords or download backups. Changing it logs out everyone who used the old one. Stored only as a hash - note it before saving. Blank + Save = turn off this login." }),
     el("div", { class: "row" }, fp, el("button", { class: "btn", text: "Generate", onclick: function () { var c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", o = ""; for (var i = 0; i < 10; i++) o += c[Math.floor(Math.random() * c.length)]; fp.value = o; } }),
       el("button", { class: "btn primary", text: "Save", onclick: function () {
         var v = fp.value.trim(); if (v && v.length < 6) { msg("Use at least 6 characters"); return; }
-        call("owner_set_password", { p_which: "finance", p_password: v }, v ? "Send this password only to Finance staff: " + v : "Finance access turned off.");
+        call("owner_set_password", { p_which: "finance", p_password: v }, v ? "Send this password only to the admins who need it: " + v : "Admin password login turned off.");
       } }))));
 
   var op1 = el("input", { type: "password", placeholder: "New owner password (8+)", autocomplete: "new-password", style: "max-width:240px" }), op2 = el("input", { type: "password", placeholder: "Repeat", autocomplete: "new-password", style: "max-width:240px" });
@@ -191,23 +202,8 @@ export function renderSetup(app) {
     call("owner_set_password", { p_which: "owner", p_password: op1.value }, "Owner password changed. Other owner logins were signed out.");
   } }))));
 
-  var tl = el("table", {}, el("tr", {}, el("th", { text: "Stock take" }), el("th", { text: "Started" }), el("th", { text: "Status" }), el("th", { text: "" })));
-  (A.takes || []).forEach(function (t) {
-    var isCur = t.id === A.take;
-    tl.append(el("tr", {}, el("td", { text: t.name + (isCur ? " (current)" : "") }), el("td", { text: tsTxt(t.startedAt) }), el("td", { text: t.closed ? "closed" : "open" }),
-      el("td", {}, isCur ? null : el("button", { class: "link", text: "make current", onclick: function () { confirmBox("Switch stock take?", "Make “" + t.name + "” the current stock take? Counters and the dashboard switch to it.", "Switch", function () { call("owner_set_take", { p_take: t.id }, "Switched."); }); } }))));
-  });
-  var nn = el("input", { type: "text", placeholder: "e.g. Stock take Dec 2026", style: "max-width:260px" });
-  app.append(el("div", { class: "card" }, el("h3", { text: "Stock takes" }),
-    el("p", { class: "small muted", text: "Starting a new stock take closes the current one and keeps it for history. Upload a fresh MB52 for the new one. PINs, team, SKUs and barcodes carry over." }),
-    el("div", { class: "tw keep" }, tl),
-    el("div", { class: "row", style: "margin-top:8px" }, nn, el("button", { class: "btn primary", text: "Start new stock take", onclick: function () {
-      var v = nn.value.trim(); if (!v) { nn.focus(); return; }
-      confirmBox("Start “" + v + "”?", "The current stock take (" + (tk.name || "") + ") is closed and kept for history.", "Start", function () { call("owner_new_take", { p_name: v }, "New stock take started. Next: upload MB52."); });
-    } }))));
-
   app.append(el("div", { class: "card" }, el("h3", { text: "Backup" }),
-    el("p", { class: "small muted", text: "The free Supabase plan has no automatic backups. Download one after every stock take and keep it safe (it contains PINs and all counts). Photos are not in the file." }),
+    el("p", { class: "small muted", text: "The free Supabase plan has no automatic backups. Download one after every stock take and keep it safe (it contains all counts). Photos are not in the file." }),
     el("button", { class: "btn primary", text: "Download backup (.json)", onclick: async function () {
       try { var r = await rpc("owner_backup", { p_token: tok() }); saveBlob(new Blob([JSON.stringify(r)], { type: "application/json" }), "ndd-stock-count-backup-" + new Date().toISOString().slice(0, 10) + ".json"); }
       catch (e) { msg("Backup failed", errText(e)); }

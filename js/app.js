@@ -1,10 +1,11 @@
-/* App shell: start-up, header, tabs, Finance/owner login, sync loop. */
+/* App shell: start-up, header, tabs, admin/owner login, sync loop, in-app browser screen. */
 import { S, hooks, loadLocal, saveTokens, sync, flush, syncPill, cur, isAdmin, isOwner, anyDirty, backup } from "./state.js";
 import { rpc } from "./api.js";
 import { $, el, pill, msg, openModal, closeModal, errText, labelTables } from "./ui.js";
 import { renderCount, withPin, loadMaster, loadBranch, roleName } from "./count.js";
 import { renderMaster, loadAdmin } from "./master.js";
 import { renderSetup } from "./setup.js";
+import { renderHome } from "./home.js";
 import { sessRole } from "./pure.js";
 
 function setHH() { var h = document.querySelector("header"); if (h) document.documentElement.style.setProperty("--hh", h.offsetHeight + "px"); }
@@ -13,12 +14,14 @@ window.addEventListener("resize", setHH);
 function render() {
   setHH();
   var m = cur();
-  $("#sub").textContent = m && m.member ? (m.branch + " · " + roleName(sessRole(m)) + " · " + m.member) : (isOwner() ? "Owner" : isAdmin() ? "Finance" : ((S.take && S.take.name) || "Stock take"));
+  $("#sub").textContent = m && m.member ? (m.branch + " · " + roleName(sessRole(m)) + " · " + m.member) : (isOwner() ? "Owner" : isAdmin() ? "Admin" : ((S.take && S.take.name) || "Stock take"));
   if (S.cfg && S.cfg.title) { $("#title").textContent = S.cfg.title; document.title = S.cfg.title; }
   drawHeader();
   if (!S.cfg) return;
   var app = $("#app"); app.innerHTML = ""; $("#foot").classList.add("hidden");
-  if (S.tab === "master" && isAdmin()) renderMaster(app);
+  if (inAppGate(app)) return;
+  if (S.tab === "home" && isAdmin()) renderHome(app);
+  else if (S.tab === "master" && isAdmin()) renderMaster(app);
   else if (S.tab === "setup" && isAdmin()) renderSetup(app);
   else renderCount(app);
   labelTables();
@@ -31,38 +34,38 @@ function drawHeader() {
   var tabs = $("#tabs"); tabs.innerHTML = "";
   if (isAdmin()) {
     tabs.classList.remove("hidden");
-    [["count", "Count"], ["master", "Master"], ["setup", "Setup"]].forEach(function (t) {
-      tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", text: t[1], onclick: function () { S.tab = t[0]; if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }));
+    [["home", "Stock take"], ["master", "Master"], ["setup", "Settings"], ["count", "Count"]].forEach(function (t) {
+      tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", text: t[1], onclick: function () { S.tab = t[0]; if (t[0] === "home") S.viewTake = null; if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }));
     });
   } else { tabs.classList.add("hidden"); S.tab = "count"; }
   var lk = $("#lockBtn");
-  lk.textContent = isAdmin() ? "🔓 Lock" : "🔒 Finance";
+  lk.textContent = isAdmin() ? "🔓 Log out" : "🔒 Admin";
 }
 function adminErr(e) {
-  if (e && e.code === "AUTH") { S.admin = null; saveTokens(); S.tab = "count"; render(); msg("Signed out", "Your Finance login expired or the password was changed. Log in again."); }
+  if (e && e.code === "AUTH") { S.admin = null; saveTokens(); S.tab = "count"; render(); msg("Signed out", "Your admin login expired or the password was changed. Log in again."); }
   else msg("Can't load", errText(e));
 }
 
 function onLockBtn() {
   if (isAdmin()) {
-    var t = S.admin.token; S.admin = null; S.adm = null; saveTokens(); S.tab = "count"; render();
+    var t = S.admin.token; S.admin = null; S.adm = null; S.viewTake = null; S.wiz = null; S.wizNew = false; saveTokens(); S.tab = "count"; render();
     rpc("logout", { p_token: t }).catch(function () { });
     return;
   }
   openModal(function (sh) {
-    var i = el("input", { type: "password", placeholder: "Finance or owner password", autocomplete: "current-password" }), err = el("div", { class: "small", style: "color:var(--bad);min-height:18px;margin-top:6px" });
+    var i = el("input", { type: "password", placeholder: "Admin or owner password", autocomplete: "current-password" }), err = el("div", { class: "small", style: "color:var(--bad);min-height:18px;margin-top:6px" });
     var go = el("button", { class: "btn primary", style: "flex:2", text: "Unlock", onclick: async function () {
       if (!i.value || go.disabled) return; go.disabled = true;
       try {
         var r = await rpc("admin_login", { p_password: i.value });
         if (!r.ok) { err.textContent = "Wrong password"; i.value = ""; return; }
         S.admin = { token: r.token, kind: r.kind }; saveTokens(); closeModal();
-        S.tab = "master"; await loadAdmin(); await loadMaster().catch(function () { }); render();
+        S.tab = "home"; S.viewTake = null; await loadAdmin(); await loadMaster().catch(function () { }); render();
       } catch (e) { err.textContent = errText(e); }
       finally { go.disabled = false; }
     } });
     i.addEventListener("keydown", function (e) { if (e.key === "Enter") go.click(); });
-    sh.append(el("h3", { text: "🔒 Finance access" }), el("p", { class: "muted small", text: "Enter the Finance password (or the owner password) to open Master and Setup." }), i, err,
+    sh.append(el("h3", { text: "🔒 Admin" }), el("p", { class: "muted small", text: "Enter the admin password (or the owner password) to set up and run stock takes." }), i, err,
       el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }), go),
       S.cfg && !S.cfg.ownerReady ? el("button", { class: "link", style: "margin-top:10px", text: "First time? Set the owner password with the setup code", onclick: bootstrap }) : null);
     setTimeout(function () { i.focus(); }, 100);
@@ -81,11 +84,28 @@ function bootstrap() {
             var r = await rpc("owner_bootstrap", { p_code: c.value.trim(), p_password: p1.value });
             if (!r.ok) { err.textContent = "Wrong or used setup code"; return; }
             S.admin = { token: r.token, kind: r.kind }; saveTokens(); S.cfg.ownerReady = true; closeModal();
-            S.tab = "setup"; await loadAdmin(); render();
-            msg("Owner password set ✓", "Next in Setup: branches & team, branch PINs, Finance password, then upload MB52.");
+            S.tab = "home"; await loadAdmin(); render();
+            msg("Owner password set ✓", "Next: set up the first stock take - name and type, pick SKUs if partial, upload the MB52, then open counting.");
           } catch (e) { err.textContent = errText(e); }
         } })));
   });
+}
+
+/* Opened inside WhatsApp / Instagram / Facebook: the camera often doesn't work there. */
+function inApp() { return /WhatsApp|Instagram|FBAN|FBAV|FB_IAB|Line\/|TikTok|; wv\)/i.test(navigator.userAgent); }
+function inAppGate(app) {
+  if (!inApp() || sessionStorage.getItem("ndd2-inapp-ok")) return false;
+  var android = /Android/i.test(navigator.userAgent), url = location.href;
+  var intent = "intent://" + url.replace(/^https?:\/\//, "") + "#Intent;scheme=https;package=com.android.chrome;end";
+  app.append(el("div", { class: "card gate" },
+    el("div", { class: "big-ico", text: "🌐" }),
+    el("h2", { text: "Open in " + (android ? "Chrome" : "Safari") + " first" }),
+    el("p", { class: "muted", text: "This page is open inside another app (like WhatsApp). The camera for scanning usually doesn't work here." }),
+    android ? el("a", { class: "btn primary block", href: intent, style: "text-decoration:none;display:block;text-align:center" }, "Open in Chrome")
+      : el("p", { style: "font-weight:600", text: "Tap ··· or the share icon, then “Open in Safari”." }),
+    el("button", { class: "btn block", style: "margin-top:8px", text: "Copy link", onclick: function () { (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(function () { msg("Link copied", "Paste it into Chrome or Safari."); }, function () { msg("Copy this link", url); }); } }),
+    el("button", { class: "link", style: "margin-top:10px", text: "Continue here anyway", onclick: function () { sessionStorage.setItem("ndd2-inapp-ok", "1"); render(); } })));
+  return true;
 }
 
 async function refreshCfg() {
@@ -101,7 +121,7 @@ async function tick() {
     var changed = await sync();
     if (S.saveErr && S.saveErr !== "PIN") { S.saveErr = null; flush(); }
     if (changed && S.tab === "count" && !document.querySelector("#modal.on") && !document.querySelector(".ssheet") && !document.querySelector(".scanov")) render();
-    if (isAdmin() && S.tab === "master" && !document.querySelector("#modal.on")) { await loadAdmin(); render(); }
+    if (isAdmin() && (S.tab === "master" || (S.tab === "home" && S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open")) && !document.querySelector("#modal.on")) { await loadAdmin(); render(); }
     syncPill();
   } catch (e) {
     if (e.code === "OFFLINE") pill(anyDirty() ? "Offline - kept on phone" : "Offline", "warn");

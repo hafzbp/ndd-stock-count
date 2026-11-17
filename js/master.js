@@ -7,7 +7,7 @@ import { exportXlsx, signoffPdf } from "./export.js";
 import { showGallery } from "./photos.js";
 
 export async function loadAdmin() {
-  var r = await rpc("admin_load", { p_token: S.admin.token });
+  var r = await rpc("admin_load", { p_token: S.admin.token, p_take: S.viewTake || null });
   S.adm = r;
   S.admin.kind = r.kind;
   S.counts = (r.sessions || []).map(function (s) {
@@ -21,7 +21,8 @@ export async function loadAdmin() {
 export function branchesAdm() { return ((S.adm && S.adm.branches) || []).filter(function (b) { return b.active; }).map(function (b) { return b.name; }); }
 export function skuMap() { var m = {}; ((S.adm && S.adm.skus) || []).forEach(function (s) { m[s.code] = s; }); return m; }
 export function tolPct() { var t = S.adm && S.adm.settings && Number(S.adm.settings.tolerance); return (t != null && !isNaN(t)) ? t : 2; }
-export function currentTake() { var id = S.adm && S.adm.take; return ((S.adm && S.adm.takes) || []).find(function (t) { return t.id === id; }) || {}; }
+export function currentTake() { return (S.adm && S.adm.takeInfo) || {}; }
+function ro() { return !!S.viewTake; }
 export function variance(br) { return varianceCore(S.sysBy[br] || [], S.counts.filter(function (d) { return d.branch === br; }), skuMap(), tolPct()); }
 function roleName(r) { return r === "fin" ? "Finance check" : "Ops count"; }
 
@@ -35,7 +36,7 @@ function sessCell(x) {
     dup.map(function (n) { return el("div", { class: "small", style: "color:var(--bad);font-weight:600;white-space:normal;max-width:260px", text: "⚠ " + n + " is on " + Object.keys(used[n]).length + " phones - check the same stock isn't counted twice" }); }),
     el("span", { class: "pill " + (allSub ? "ok" : "warn"), text: allSub ? "Submitted" : "Counting" }),
     x.map(function (d) { return el("button", { class: "link", style: "margin-left:6px", text: "📷 " + (d.photos || 0), title: "Warehouse photos", onclick: function () { showGallery(d, S.admin.token); } }); }),
-    x.filter(function (d) { return d.status === "submitted"; }).map(function (d) { return el("button", { class: "link", style: "margin-left:6px", text: "reopen", onclick: function () { reopenSess(d); } }); })));
+    ro() ? null : x.filter(function (d) { return d.status === "submitted"; }).map(function (d) { return el("button", { class: "link", style: "margin-left:6px", text: "reopen", onclick: function () { reopenSess(d); } }); })));
 }
 async function reopenSess(d) {
   try { await rpc("admin_reopen", { p_token: S.admin.token, p_id: d.id }); await loadAdmin(); hooks.render(); }
@@ -53,25 +54,32 @@ function stat(n, l) { return el("div", { class: "stat" }, el("b", { text: fmt(n)
 export function renderMaster(app) {
   if (!S.adm) { app.append(el("p", { class: "center muted", text: "Loading…" })); loadAdmin().then(hooks.render, function (e) { msg("Can't load", errText(e)); }); return; }
   var br = branchesAdm(), docs = S.counts, tk = currentTake();
+  if (ro()) app.append(el("div", { class: "banner warn row", style: "justify-content:space-between" }, el("span", { text: "History (read-only): " + (tk.name || "") }),
+    el("button", { class: "btn", text: "Back to current", onclick: function () { S.viewTake = null; loadAdmin().then(hooks.render); } })));
+  else if (tk.status === "draft") { app.append(el("div", { class: "card center" }, el("h2", { text: "Counting isn't open yet" }), el("p", { class: "muted", text: "Finish setting up " + (tk.name || "the stock take") + " in the Stock take tab, then open counting." }), el("button", { class: "btn primary", text: "Go to setup", onclick: function () { S.tab = "home"; hooks.render(); } }))); return; }
+  br = br.filter(function (b) { return (S.sysBy[b] || []).length || docs.some(function (d) { return d.branch === b; }); });
   var both = br.filter(function (b) { var x = docs.filter(function (d) { return d.branch === b; }); return x.some(function (d) { return sessRole(d) === "ops" && d.status === "submitted"; }) && x.some(function (d) { return sessRole(d) === "fin" && d.status === "submitted"; }); }).length;
   var started = br.filter(function (b) { return docs.some(function (d) { return d.branch === b; }); }).length;
-  app.append(el("div", { class: "stats" }, stat(br.length, "Branches"), stat(started, "Started"), stat(both, "Both teams submitted"), stat((S.adm.skus || []).length, "SKUs")));
+  app.append(el("div", { class: "stats" }, stat(br.length, "Warehouses"), stat(started, "Started"), stat(both, "Both teams submitted"), stat(tk.scope === "partial" ? tk.skuCount : (S.adm.skus || []).length, tk.scope === "partial" ? "SKUs picked" : "SKUs")));
   app.append(el("div", { class: "card row", style: "justify-content:space-between" },
-    el("div", {}, el("b", { text: "Master file · " + (tk.name || "") }), el("div", { class: "small muted", text: "Double count: Ops vs Finance must MATCH before a line is compared to SAP. System stock loaded for " + Object.keys(S.sysBy).length + " branch(es)." + (tk.closed ? " Counting is CLOSED." : "") })),
-    el("div", { class: "row" }, isOwner() ? el("button", { class: "btn", style: "color:var(--bad)", text: "Clear all counts", onclick: clearAll }) : null,
-      el("button", { class: "btn", text: tk.closed ? "Reopen counting" : "Close counting", onclick: async function () {
-        try { await rpc("admin_settings", { p_token: S.admin.token, p_patch: { closed: !tk.closed } }); await loadAdmin(); hooks.render(); } catch (e) { msg("Failed", errText(e)); }
+    el("div", {}, el("b", { text: (tk.name || "") + " · " + (tk.status === "closed" ? "Closed" : "Open") + (tk.scope === "partial" ? " · Partial" : "") }), el("div", { class: "small muted", text: "Double count: Ops vs Finance must MATCH before a line is compared to SAP." })),
+    el("div", { class: "row" }, isOwner() && !ro() ? el("button", { class: "btn", style: "color:var(--bad)", text: "Clear all counts", onclick: clearAll }) : null,
+      ro() ? null : el("button", { class: "btn", text: tk.status === "closed" ? "Reopen counting" : "Close counting", onclick: function () {
+        var to = tk.status === "closed" ? "open" : "closed";
+        confirmBox(to === "closed" ? "Close counting?" : "Reopen counting?", to === "closed" ? "Counters can't change anything after this. You can reopen later." : "Counters can change their counts again until you close it.", to === "closed" ? "Close" : "Reopen", async function () {
+          try { await rpc("admin_set_status", { p_token: S.admin.token, p_status: to }); await loadAdmin(); hooks.render(); } catch (e) { msg("Failed", errText(e)); }
+        });
       } }),
       el("button", { class: "btn", text: "↻", title: "Refresh", onclick: function () { loadAdmin().then(hooks.render); } }),
       el("button", { class: "btn primary", text: "Export to Excel", onclick: exportXlsx }))));
-  var t = el("table", {}, el("tr", {}, ["Branch", "Ops count", "Finance check", "Match", "Recount", "Waiting", "Last update", ""].map(function (h, i) { return el("th", { class: (i >= 3 && i <= 5) ? "n" : "", text: h }); })));
+  var t = el("table", {}, el("tr", {}, ["Warehouse", "Ops count", "Finance check", "Match", "Recount", "Waiting", "Last update", ""].map(function (h, i) { return el("th", { class: (i >= 3 && i <= 5) ? "n" : "", text: h }); })));
   br.forEach(function (b) {
     var x = docs.filter(function (d) { return d.branch === b; }), V = x.length ? variance(b) : [], c = { MATCH: 0, RECOUNT: 0, W: 0 };
     V.forEach(function (o) { if (o.status === "MATCH") c.MATCH++; else if (o.status === "RECOUNT") c.RECOUNT++; else if (/^WAITING/.test(o.status)) c.W++; });
     t.append(el("tr", {}, el("td", { text: b }), sessCell(x.filter(function (d) { return sessRole(d) === "ops"; })), sessCell(x.filter(function (d) { return sessRole(d) === "fin"; })),
       el("td", { class: "n", text: c.MATCH || "" }), el("td", { class: "n" + (c.RECOUNT ? " neg" : ""), text: c.RECOUNT || "" }), el("td", { class: "n", text: c.W || "" }),
       el("td", { text: tsTxt(x.map(function (d) { return d.updatedAt || ""; }).sort().pop()) }),
-      el("td", {}, (x.some(function (d) { return sessRole(d) === "ops"; }) && x.some(function (d) { return sessRole(d) === "fin"; })) ? el("button", { class: "btn", style: "padding:6px 10px", text: (c.RECOUNT + c.W) ? "Send recount list (" + (c.RECOUNT + c.W) + ")" : "Clear recount list", onclick: function () { sendRecount(b, V); } }) : null)));
+      el("td", {}, (!ro() && x.some(function (d) { return sessRole(d) === "ops"; }) && x.some(function (d) { return sessRole(d) === "fin"; })) ? el("button", { class: "btn", style: "padding:6px 10px", text: (c.RECOUNT + c.W) ? "Send recount list (" + (c.RECOUNT + c.W) + ")" : "Clear recount list", onclick: function () { sendRecount(b, V); } }) : null)));
   });
   app.append(el("div", { class: "card" }, el("h3", { text: "Progress - Ops count vs Finance check" }), el("div", { class: "tw" }, t)));
   if (!S.mBranch || br.indexOf(S.mBranch) < 0) S.mBranch = br[0] || "";

@@ -12,7 +12,7 @@ export var S = {
   br: {},                    // branch -> {codes, batches, recount}
   mine: { takeId: null, resetId: null, sessions: {}, active: null },
   recount: {},               // branch -> ["code|batch"]
-  take: null,                // {id,name,closed,resetId}
+  take: null,                // {id,name,status,scope,skuCount,resetId}
   tab: "count", step: "", q: "", filter: "todo", open: {},
   saving: false, timer: null, saveErr: null,
   adm: null, mBranch: "", mOnly: true
@@ -60,7 +60,7 @@ export function fromServer(s) {
 export function applySync(res) {
   var changed = false, t = res.take;
   if (t) {
-    if (!S.take || S.take.closed !== t.closed) changed = true;
+    if (!S.take || S.take.status !== t.status || S.take.scope !== t.scope) changed = true;
     S.take = t;
     if (!S.mine.takeId) { S.mine.takeId = t.id; S.mine.resetId = t.resetId; }
     else if (S.mine.takeId !== t.id || S.mine.resetId !== t.resetId) {
@@ -122,7 +122,7 @@ export async function flush() {
       if (!r.ok) {
         var srv = fromServer(r.session); m.dirty = false;
         if (srv.status === "submitted") { S.mine.sessions[m.id] = srv; toast("This count is submitted, it can't be changed now."); }
-        else if (r.closed) { S.mine.sessions[m.id] = srv; toast("Counting is closed by Finance."); }
+        else if (r.closed) { S.mine.sessions[m.id] = srv; toast("Counting is closed."); }
         hooks.render();
       }
       S.saveErr = null;

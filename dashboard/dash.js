@@ -15,7 +15,7 @@ function kpi(v, l, cls) { return el("div", { class: "kpi" }, el("b", { class: cl
 function draw(d) {
   document.title = (d.title || "Stock Count") + " · Dashboard";
   $("#title").textContent = (d.title || "Stock Count") + " · Live dashboard";
-  $("#sub").textContent = (d.take || "") + (d.closed ? " · counting closed" : " · counting open") + " · updated " + tsTxt(d.generatedAt);
+  $("#sub").textContent = (d.take || "") + (d.scope === "partial" ? " · partial, " + d.skuCount + " SKUs" : "") + " · " + (d.status === "draft" ? "not started yet" : d.status === "closed" ? "counting closed" : "counting open") + " · updated " + tsTxt(d.generatedAt);
   var B = d.branches || [], app = $("#app"); app.innerHTML = "";
   var exp = 0, od = 0, fd = 0, both = 0, started = 0;
   B.forEach(function (b) { exp += b.expected; od += b.opsDone; fd += b.finDone; if (b.ops === "submitted" && b.fin === "submitted") both++; if (b.ops !== "not_started" || b.fin !== "not_started") started++; });
@@ -28,7 +28,8 @@ function draw(d) {
     if (d.level === "value") k.append(kpi("RM " + fmt(rm, 2), "Net variance value", rm < 0 ? "neg" : rm > 0 ? "pos" : ""));
   }
   app.append(k);
-  if (!d.showVariance) app.append(el("div", { class: "note", text: d.level === "progress" ? "Showing counting progress. Variance is not published." : "Variance appears here after Finance closes counting." }));
+  if (d.status === "draft") app.append(el("div", { class: "note", text: "The stock take hasn't started yet. Progress shows here once counting is open." }));
+  else if (!d.showVariance) app.append(el("div", { class: "note", text: d.level === "progress" ? "Showing counting progress. Variance is not published." : "Variance appears here after the admin closes counting." }));
   if (!B.length) { app.append(el("div", { class: "center muted", text: "No branches set up yet." })); return; }
   var g = el("div", { class: "grid" });
   B.forEach(function (b) {

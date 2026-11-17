@@ -86,7 +86,9 @@ export function buildWorkbook() {
   su["A" + (t + 4)] = { t: "s", v: "Summary agreed total less Variance sheet total" }; su["B" + (t + 4)] = { t: "n", f: "ROUND(H" + t + "-SUM(" + rg("P") + "),3)" };
   su["A" + (t + 5)] = { t: "s", v: "Lines still RECOUNT or WAITING (must be 0 before sign-off)" }; su["B" + (t + 5)] = { t: "n", f: "D" + t + "+E" + t };
   su["L1"] = { t: "s", v: "Tolerance per SKU" }; su["M1"] = { t: "n", v: tolPct() / 100, z: "0.0%" };
-  var me = S.adm && S.adm.meta, tr = t + 7, ref = "A1:M" + (t + 5);
+  var me = S.adm && S.adm.meta, tr = t + 7, ref = "A1:M" + (t + 5), tkx = currentTake();
+  su["L2"] = { t: "s", v: "Stock take" }; su["M2"] = { t: "s", v: (tkx.name || "") + (tkx.scope === "partial" ? " (partial, " + tkx.skuCount + " SKUs)" : " (total)") };
+  if (me && tkx.scope === "partial") { su["A" + tr] = { t: "s", v: "MB52 tie-out not applicable: partial count compares only the picked SKUs." }; ref = "A1:M" + tr; me = null; }
   if (me) {
     var tie = [["MB52 TIE-OUT (value, RM) - upload of " + tsTxt(me.loadedAt), null],
       ["Good stock used as System (unrestricted + restricted + QI)", me.goodV],
@@ -120,6 +122,7 @@ export async function signoffPdf(b) {
   var subs = ses.map(function (x) { return x.submittedAt || ""; }).filter(Boolean).sort();
   d.text("Count submitted: " + (subs.length ? tsTxt(subs[0]) + (subs.length > 1 ? " to " + tsTxt(subs[subs.length - 1]) : "") : "-") + "     Generated: " + tsTxt(nowIso()), W - 14, y, { align: "right" }); y += 5;
   if (!final) { d.setTextColor(200, 0, 0); d.setFont("helvetica", "bold"); d.text("DRAFT - not final: " + (!allSub ? "not all counts submitted. " : "") + (open ? open + " line(s) still RECOUNT / WAITING." : ""), 14, y); d.setTextColor(0); d.setFont("helvetica", "normal"); y += 5; }
+  if (tk.scope === "partial") { d.setFont("helvetica", "bold"); d.text("Partial count: " + tk.skuCount + " picked SKU(s) only.", 14, y); d.setFont("helvetica", "normal"); y += 5; }
   d.text("Quantities in PCS. Double count: Operations and Finance counted separately; only MATCH lines are agreed. System = SAP MB52 good stock (bad/blocked excluded). Tolerance ±" + tolPct() + "% per SKU.", 14, y, { maxWidth: W - 28 }); y += 9;
   d.autoTable({ startY: y, theme: "grid", styles: { fontSize: 9, cellPadding: 1.6 }, headStyles: { fillColor: [60, 60, 60] }, head: [["Summary", "Value"]],
     body: [["Lines - MATCH", F(lc.MATCH || 0)], ["Lines - RECOUNT / WAITING", F(open)], ["Lines - NOT COUNTED (system stock, nobody counted)", F(lc["NOT COUNTED"] || 0)],

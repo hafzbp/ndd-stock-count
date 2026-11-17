@@ -171,7 +171,7 @@ function openCount(s, barcode, uom) {
     }
     function upd() {
       var cv = toPcs(vals, s);
-      totalEl.textContent = cv.ok ? fmt(cv.qty || 0) + " PCS" : "No conversion - tell Finance";
+      totalEl.textContent = cv.ok ? fmt(cv.qty || 0) + " PCS" : "No conversion - tell your admin";
       var any = vals.ctn != null || vals.box != null || vals.pcs != null;
       saveBtn.disabled = batch == null || !any;
       saveBtn.textContent = batch == null ? "Pick the batch month first" : !any ? "Enter the quantity" : (ov ? "Save & scan next" : "Save");
@@ -251,7 +251,7 @@ function openPicker(barcode) {
     sh.append(
       el("div", { class: barcode ? "unk" : "found" }, barcode ? "Barcode not registered" : "Search SKU", barcode ? el("span", { class: "muted", text: " · " + barcode }) : null),
       el("div", { class: "skuname", text: barcode ? "Which SKU is this?" : "Pick the SKU you are counting" }),
-      barcode ? el("div", { class: "muted small", text: "Your choice is sent to Finance so they can add this barcode to the master. Next scan of this barcode on this phone goes straight to the SKU." }) : null,
+      barcode ? el("div", { class: "muted small", text: "Your choice is sent to your admin so they can add this barcode to the master. Next scan of this barcode on this phone goes straight to the SKU." }) : null,
       el("div", { style: "height:10px" }), q, list,
       el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn grow", type: "button", text: ov ? "Cancel, scan again" : "Cancel", onclick: function () { closeSheet(true); } })));
     draw(); setTimeout(function () { q.focus(); }, 300);

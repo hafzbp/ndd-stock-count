@@ -10,28 +10,36 @@ export var REMARKS = ["Damaged", "Expired", "Near expiry", "Wrong location"];
 export function roleName(r) { return r === "fin" ? "Finance check" : "Ops count"; }
 function roleOf(t) { return t.role || "Checker"; }
 
-/* ---------- PIN ---------- */
+/* ---------- plant code (branch login) ---------- */
+/* Pad for the SAP plant code. onOk(branch, take) after a successful login. wantBranch: only accept that branch. */
+export function plantPad(title, sub, wantBranch, onOk, inline) {
+  var v = "", d = el("div", { class: "disp", style: "letter-spacing:8px" }), err = el("div", { class: "small", style: "color:var(--bad);text-align:center;min-height:20px;margin-top:6px" });
+  function draw() { d.textContent = v || "-"; } draw();
+  var go = el("button", { class: "btn primary", style: "flex:2", text: "Next", onclick: async function () {
+    if (!v || go.disabled) return; go.disabled = true; go.textContent = "Checking…";
+    try {
+      var r = await rpc("plant_login", { p_code: v });
+      if (!r.ok) { v = ""; draw(); err.textContent = "No warehouse with that plant code"; return; }
+      if (wantBranch && r.branch !== wantBranch) { v = ""; draw(); err.textContent = "That code is for " + r.branch + ", not " + wantBranch; return; }
+      S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null;
+      if (r.take) S.take = Object.assign({}, S.take || {}, r.take);
+      if (!inline) closeModal();
+      await loadMaster().catch(function () { });
+      onOk(r.branch, r.take);
+      flush();
+    } catch (e) { err.textContent = errText(e); }
+    finally { go.disabled = false; go.textContent = "Next"; }
+  } });
+  var pad = el("div", { class: "pad" }); "1 2 3 4 5 6 7 8 9 C 0 ⌫".split(" ").forEach(function (k) { pad.append(el("button", { text: k, "aria-label": k === "⌫" ? "delete" : k === "C" ? "clear" : k, onclick: function () { if (k === "C") v = ""; else if (k === "⌫") v = v.slice(0, -1); else if (v.length < 8) v += k; err.textContent = ""; draw(); } })); });
+  var box = el("div", {}, el(inline ? "h2" : "h3", { text: title }), el("p", { class: "muted small", text: sub }), d, err, pad,
+    el("div", { class: "row", style: "margin-top:12px" }, inline ? null : el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }), go));
+  if (inline) return box;
+  openModal(function (sh) { sh.append(box); });
+}
+/* Re-open access to a branch (token missing or expired) with its plant code. */
 export function withPin(br, fn) {
   if (tokenFor(br)) return fn();
-  var v = "";
-  openModal(function (sh) {
-    var d = el("div", { class: "disp", style: "letter-spacing:10px" }), err = el("div", { class: "small", style: "color:var(--bad);text-align:center;min-height:20px;margin-top:6px" });
-    function draw() { d.textContent = v ? v.replace(/./g, "●") : "-"; } draw();
-    var go = el("button", { class: "btn primary", style: "flex:2", text: "Unlock", onclick: async function () {
-      if (!v || go.disabled) return; go.disabled = true; go.textContent = "Checking…";
-      try {
-        var r = await rpc("pin_login", { p_branch: br, p_pin: v });
-        if (!r.ok) { v = ""; draw(); err.textContent = "Wrong PIN"; return; }
-        S.tokens[br] = r.token; saveTokens(); S.saveErr = null; closeModal();
-        await loadMaster(); fn();
-        flush();
-      } catch (e) { err.textContent = errText(e); }
-      finally { go.disabled = false; go.textContent = "Unlock"; }
-    } });
-    var pad = el("div", { class: "pad" }); "1 2 3 4 5 6 7 8 9 C 0 ⌫".split(" ").forEach(function (k) { pad.append(el("button", { text: k, onclick: function () { if (k === "C") v = ""; else if (k === "⌫") v = v.slice(0, -1); else if (v.length < 6) v += k; err.textContent = ""; draw(); } })); });
-    sh.append(el("h3", { text: "🔒 " + br }), el("p", { class: "muted small", text: "Enter the branch PIN from Finance." }), d, err, pad,
-      el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }), go));
-  });
+  plantPad("🔒 " + br, "Enter the plant code of " + br + " again.", br, function () { fn(); });
 }
 
 export async function loadMaster() {
@@ -58,7 +66,8 @@ export async function loadBranch(br) {
 
 function branches() { return ((S.cfg && S.cfg.branches) || []).slice(); }
 function team() { return S.team || []; }
-function closed() { return !!(S.take && S.take.closed); }
+function tstatus() { return (S.take && S.take.status) || "open"; }
+function closed() { return tstatus() !== "open"; }
 function rcMap() { var o = {}; ((cur() && S.recount[cur().branch]) || []).forEach(function (k) { o[k] = 1; }); return o; }
 function rcSku(code) { var r = rcMap(); return Object.keys(r).some(function (k) { return k.split("|")[0] === code; }); }
 
@@ -73,8 +82,9 @@ export function renderCount(app) {
   }
   bd = bd || { codes: [], batches: {} };
   var locked = m.status === "submitted" || (closed() && !isAdmin());
-  if (closed() && !isAdmin()) app.append(el("div", { class: "banner warn", text: "Counting is closed by Finance." }));
-  else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + ". Ask Finance to reopen if anything needs changing." }));
+  if (closed() && !isAdmin()) app.append(el("div", { class: "banner warn", text: tstatus() === "draft" ? "Counting hasn't started yet. Your admin will open it." : "Counting is closed." }));
+  else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + ". Ask your admin to reopen if anything needs changing." }));
+  if (S.take && S.take.scope === "partial") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Partial count · " + (bd.codes || []).length + " SKU(s) to count at this warehouse"));
   app.append(el("div", { class: "banner", style: "background:" + (sessRole(m) === "fin" ? "var(--badbg);color:var(--accent)" : "var(--okbg);color:var(--ok)") },
     (sessRole(m) === "fin" ? "FINANCE CHECK" : "OPS COUNT") + " - count everything yourself. Do not share or compare numbers with the other team."));
   var nRc = Object.keys(rcMap()).length;
@@ -107,7 +117,7 @@ export function renderCount(app) {
     if (S.filter === "todo") rows = rows.filter(function (s) { return (inSys[s.code] || q) && !skuDone(s); });
     if (S.filter === "done") rows = rows.filter(skuDone);
     if (S.filter === "recount") rows = rows.filter(function (s) { return rcSku(s.code); });
-    if (!skus.length) list.append(el("p", { class: "center muted", text: "SKU list not loaded yet - check back after Finance uploads it." }));
+    if (!skus.length) list.append(el("p", { class: "center muted", text: "SKU list not loaded yet - check back after your admin uploads it." }));
     else if (!rows.length) list.append(el("p", { class: "center muted", text: S.filter === "todo" && !q ? "All done 🎉 Use search or “All” for anything else on the floor." : "Nothing here." }));
     rows.slice(0, 300).forEach(function (s) { list.append(skuCard(s, locked)); });
     if (!locked) list.append(el("button", { class: "btn block", style: "margin-top:8px", text: "+ SKU not in the list", onclick: function () { addExtraSku(m); } }));
@@ -119,7 +129,7 @@ export function renderCount(app) {
   fi.append(el("button", { class: "btn", text: "⚙", "aria-label": "Settings", onclick: function () {
       openModal(function (sh) {
         sh.append(el("h3", { text: "Settings" }),
-          el("button", { class: "btn block", style: "margin-bottom:8px", text: "Switch person / branch", onclick: function () { closeModal(); S.step = "who"; hooks.render(); window.scrollTo(0, 0); } }),
+          el("button", { class: "btn block", style: "margin-bottom:8px", text: "Switch person / warehouse", onclick: function () { closeModal(); S.step = "who"; S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); } }),
           el("button", { class: "btn block", style: "margin-bottom:8px", text: "Change name(s)", disabled: locked, onclick: function () { closeModal(); editCounters(m, locked); } }),
           el("button", { class: "btn block", style: "margin-bottom:8px", text: "📷 Warehouse photos (" + (m.photos || 0) + ")", onclick: function () { closeModal(); photoModal(m, locked); } }),
           el("button", { class: "btn block", style: "margin-bottom:8px;color:var(--bad)", text: "Reset this count (delete all quantities)", disabled: locked, onclick: function () {
@@ -173,7 +183,7 @@ function submitFlow(m, expected) {
     function upd() { go.disabled = !(cb.checked && pads.every(function (p) { return p.signed(); }) && (!pr.on || (m.photos || 0) >= pr.min)); }
     cb.addEventListener("change", upd);
     sh.append(el("h3", { text: "⚠️ Are you sure you want to submit?" }),
-      el("div", { class: "banner warn", style: "margin:8px 0" }, "Once submitted, you CANNOT edit this count. Only Finance can reopen it."),
+      el("div", { class: "banner warn", style: "margin:8px 0" }, "Once submitted, you CANNOT edit this count. Only your admin can reopen it."),
       el("p", { class: "small", text: m.branch + " · " + roleName(sessRole(m)) + " · " + m.member }),
       el("p", { class: "small", text: counted + " batch line(s) counted." }),
       left ? el("p", { class: "small", style: "color:var(--bad);font-weight:600", text: left + " SKU(s) in this branch are NOT counted yet. Not counted is not the same as zero - use 0 if there is no stock." }) : el("p", { class: "small", style: "color:var(--ok)", text: "All branch SKUs have a count." }),
@@ -189,7 +199,7 @@ function dataOfLocal(m) { return { member: m.member || "", names: m.names || [],
 function addExtraSku(m) {
   openModal(function (sh) {
     var c = el("input", { type: "text", inputmode: "numeric", placeholder: "SKU code (from the label)" }), d = el("input", { type: "text", placeholder: "Description (optional)" });
-    sh.append(el("h3", { text: "SKU not in the list" }), el("p", { class: "muted small", text: "Only for stock on the floor that isn't in the list. Count it in Pieces. Finance will check it." }), c, el("div", { style: "height:8px" }), d,
+    sh.append(el("h3", { text: "SKU not in the list" }), el("p", { class: "muted small", text: "Only for stock on the floor that isn't in the list. Count it in Pieces. Your admin will check it." }), c, el("div", { style: "height:8px" }), d,
       el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }),
         el("button", { class: "btn primary", style: "flex:1", text: "Add", onclick: function () {
           var code = c.value.trim(); if (!code) { c.focus(); return; }
@@ -256,7 +266,7 @@ function batchRow(s, b, locked, redraw) {
   if (hasQty(l)) {
     var cv = toPcs(l, s), parts = []; if (l.ctn) parts.push(fmt(l.ctn) + " × " + fmt(s.per || 0)); if (l.box) parts.push(fmt(l.box) + " × " + fmt(s.perBox || 0)); if (l.pcs) parts.push(fmt(l.pcs));
     box.append(el("div", { style: "margin-top:6px;padding:8px 10px;border-radius:9px;background:" + (cv.ok ? "var(--okbg)" : "var(--warnbg)") + ";color:" + (cv.ok ? "var(--ok)" : "var(--warn)") + ";font-weight:700;display:flex;justify-content:space-between" },
-      el("span", { style: "font-weight:400", text: parts.join(" + ") || "0" }), el("span", { text: cv.ok ? "= " + fmt(cv.qty) + " PCS" : "No conversion - tell Finance" })));
+      el("span", { style: "font-weight:400", text: parts.join(" + ") || "0" }), el("span", { text: cv.ok ? "= " + fmt(cv.qty) + " PCS" : "No conversion - tell your admin" })));
   }
   var c1 = (l.remark || "").split(" | ").filter(Boolean), rms = el("div", { class: "rms" + (c1.length ? "" : " hidden") });
   REMARKS.forEach(function (r) { var on = c1.indexOf(r) >= 0; rms.append(el("button", { class: "chip rm" + (on ? " on" : ""), text: r, disabled: locked, onclick: function () { var c = c1.slice(); if (on) c.splice(c.indexOf(r), 1); else c.push(r); setLine(s, b, { remark: c.join(" | ") }); redraw(); } })); });
@@ -321,78 +331,102 @@ function namesFor(br, role) {
   return { mine: mine, others: others };
 }
 function renderStart(app) {
-  var br = branches(), role = S.pickRole || "", pickBr = "", names = [];
-  var ss = S.mine.sessions || {}, keys = Object.keys(ss);
-  if (closed() && !isAdmin()) app.append(el("div", { class: "banner warn", text: "Counting is closed by Finance." }));
-  if (S.cfg && !S.cfg.ownerReady && br.length) app.append(el("div", { class: "banner warn row", style: "justify-content:space-between" },
-    el("span", { text: "Owner: set your password first (one-time setup code)." }),
-    el("button", { class: "btn primary", text: "Start first-time setup", onclick: function () { if (hooks.openLogin) hooks.openLogin(true); } })));
-  if (keys.length) {
-    app.append(el("h2", { text: "Continue a count" }));
-    var cg = el("div", { class: "grid", style: "margin-bottom:18px" });
-    keys.forEach(function (k) {
-      var x = ss[k], n = Object.keys(x.lines || {}).filter(function (j) { return hasQty(x.lines[j]); }).length;
-      cg.append(el("button", { class: "big" + (S.mine.active === k ? " on" : ""), onclick: function () { withPin(x.branch, function () { S.mine.active = k; S.step = ""; backup(); hooks.render(); window.scrollTo(0, 0); }); } },
-        el("div", { text: x.branch }), el("div", { class: "small", style: "font-weight:700;color:" + (sessRole(x) === "fin" ? "var(--accent)" : "var(--ok)"), text: roleName(sessRole(x)).toUpperCase() }),
-        el("div", { class: "small muted", style: "font-weight:400", text: x.member }),
-        el("div", { class: "small muted", style: "font-weight:400", text: n + " line" + (n === 1 ? "" : "s") + (x.status === "submitted" ? " · submitted ✓" : "") })));
-    });
-    app.append(cg, el("h2", { text: "Or start a new count" }));
-  }
-  if (!br.length) {
-    var first = S.cfg && !S.cfg.ownerReady;
+  var ss = S.mine.sessions || {}, keys = Object.keys(ss), st = S.start || (S.start = { step: "code" });
+  if (S.cfg && !S.cfg.ownerReady) {
     app.append(el("div", { class: "card center" },
-      el("h2", { text: first ? "Welcome - first-time setup" : "Not ready for counting yet" }),
-      el("p", { class: "muted", text: first
-        ? "Nobody has set up this app yet. The owner sets a password with the one-time setup code, then uploads the SAP MB52 in Setup."
-        : "No branches yet. Finance: log in, go to Setup and upload the SAP MB52 - branches are created from it." }),
-      el("button", { class: "btn primary", text: first ? "Start first-time setup" : "🔒 Finance login", onclick: function () { if (hooks.openLogin) hooks.openLogin(first); } }),
-      el("p", { class: "small muted", style: "margin-top:12px", text: "Counters: once Finance finishes Setup, your branch appears here. Ask Finance for your branch PIN." })));
+      el("h2", { text: "Welcome - first-time setup" }),
+      el("p", { class: "muted", text: "Nobody has set up this app yet. The owner sets a password with the one-time setup code, then sets up the first stock take." }),
+      el("button", { class: "btn primary", text: "Start first-time setup", onclick: function () { if (hooks.openLogin) hooks.openLogin(true); } })));
     return;
   }
-  app.append(el("h2", { text: "1. I am counting as" }));
-  var rg = el("div", { class: "grid" });
-  [["ops", "Operations", "Ops team counts the stock"], ["fin", "Finance", "Finance counts again, separately"]].forEach(function (r) {
-    rg.append(el("button", { class: "big" + (role === r[0] ? " on" : ""), onclick: function () { role = r[0]; S.pickRole = role; names = []; draw(); } }, el("div", { text: r[1] }), el("div", { class: "small muted", style: "font-weight:400", text: r[2] })));
-  });
-  app.append(rg);
-  var rest = el("div"); app.append(rest);
-  function draw() {
-    Array.from(rg.children).forEach(function (x, ix) { x.classList.toggle("on", (ix === 0 ? "ops" : "fin") === role); }); rest.innerHTML = ""; if (!role) return;
-    rest.append(el("p", { class: "small", style: "margin:10px 0 0;color:var(--warn);font-weight:600", text: "Both teams count everything on their own. Do not share or compare numbers - the app compares them." }));
-    rest.append(el("h2", { style: "margin-top:18px", text: "2. Branch" }));
-    var g = el("div", { class: "grid" }); br.forEach(function (b) { g.append(el("button", { class: "big" + (pickBr === b ? " on" : ""), text: b, onclick: function () { withPin(b, function () { if (pickBr !== b) { pickBr = b; names = []; } draw(); }); } })); });
-    rest.append(g); if (!pickBr) return;
-    var list = namesFor(pickBr, role === "fin" ? "Checker" : "Counter");
-    var startBtn = el("button", { class: "btn primary block", style: "margin-top:18px", text: "Start counting", onclick: go });
-    function upd() { startBtn.disabled = !names.length; startBtn.textContent = names.length ? "Start " + roleName(role).toLowerCase() : (role === "fin" ? "Pick your name" : "Pick at least one name"); }
-    rest.append(el("h2", { style: "margin-top:18px", text: role === "fin" ? "3. Your name - Finance" : "3. Counter(s) - Operations" }),
-      role === "ops" ? el("p", { class: "small muted", text: "Tap everyone counting together on this phone." }) : null,
-      peoplePicker(list.mine, list.others, role === "ops", names, function (v) { names = v; upd(); }), startBtn);
-    upd();
+  function stepBar(n) {
+    return el("div", { class: "steps" }, ["Warehouse", "Team", "Name"].map(function (t, i) { return el("div", { class: "stp" + (i < n ? " done" : i === n ? " now" : "") }, el("i"), el("span", { text: t })); }));
   }
+  function reset() { S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); }
+
+  if (st.step === "code") {
+    if (keys.length) {
+      app.append(el("h2", { text: "Continue a count" }));
+      var cg = el("div", { class: "grid", style: "margin-bottom:18px" });
+      keys.forEach(function (k) {
+        var x = ss[k], n = Object.keys(x.lines || {}).filter(function (j) { return hasQty(x.lines[j]); }).length;
+        cg.append(el("button", { class: "big" + (S.mine.active === k ? " on" : ""), onclick: function () { withPin(x.branch, function () { S.mine.active = k; S.step = ""; S.start = null; backup(); hooks.render(); window.scrollTo(0, 0); }); } },
+          el("div", { text: x.branch }), el("div", { class: "small", style: "font-weight:700;color:" + (sessRole(x) === "fin" ? "var(--accent)" : "var(--ok)"), text: roleName(sessRole(x)).toUpperCase() }),
+          el("div", { class: "small muted", style: "font-weight:400", text: x.member }),
+          el("div", { class: "small muted", style: "font-weight:400", text: n + " line" + (n === 1 ? "" : "s") + (x.status === "submitted" ? " · submitted ✓" : "") })));
+      });
+      app.append(cg, el("h2", { style: "margin-top:8px", text: "Or start a new count" }));
+    }
+    app.append(stepBar(0), el("div", { class: "card", style: "max-width:420px;margin:0 auto" },
+      plantPad("Enter your warehouse plant code", "The SAP plant code of the warehouse you are counting, for example 1508.", null, function (br) {
+        S.start = { step: "confirm", branch: br }; hooks.render(); window.scrollTo(0, 0);
+      }, true)));
+    return;
+  }
+  if (st.step === "confirm") {
+    var ts = tstatus();
+    app.append(stepBar(0));
+    if (ts !== "open") {
+      app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: st.branch }),
+        el("h2", { text: ts === "draft" ? "Counting hasn't started yet" : "Counting is closed" }),
+        el("p", { class: "muted", text: ts === "draft" ? "Your admin will open the stock take. Try again when they tell you it's open." : "This stock take is finished. Ask your admin if something still needs counting." }),
+        el("div", { class: "row", style: "justify-content:center" },
+          el("button", { class: "btn primary", text: "Try again", onclick: async function () { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e) { } hooks.render(); } }),
+          el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
+      return;
+    }
+    app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: "Your warehouse" }), el("h2", { style: "font-size:24px;margin:6px 0 14px", text: st.branch }),
+      S.take && S.take.scope === "partial" ? el("p", { class: "small", text: "Partial count: only the SKUs your admin picked." }) : null,
+      el("div", { class: "row", style: "justify-content:center" },
+        el("button", { class: "btn primary", text: "Yes, that's my warehouse", onclick: function () { st.step = "team"; hooks.render(); } }),
+        el("button", { class: "btn", text: "No, enter again", onclick: reset }))));
+    return;
+  }
+  if (st.step === "team") {
+    app.append(stepBar(1), el("h2", { text: "Which team are you?" }), el("p", { class: "small muted", text: st.branch }));
+    var rg = el("div", { class: "grid" });
+    [["ops", "Operations", "Ops team counts the stock"], ["fin", "Finance", "Finance counts again, separately"]].forEach(function (r) {
+      rg.append(el("button", { class: "big", onclick: function () {
+        var other = Object.keys(S.mine.sessions).some(function (k2) { var x2 = S.mine.sessions[k2]; return x2.branch === st.branch && sessRole(x2) !== r[0] && sessHasQty(x2); });
+        if (other && !isOwner()) { msg("Not allowed", "This phone already has a " + roleName(r[0] === "ops" ? "fin" : "ops") + " for " + st.branch + ". Ops and Finance must count on different phones so the two counts stay independent."); return; }
+        st.role = r[0]; st.names = []; st.step = "names"; hooks.render();
+      } }, el("div", { text: r[1] }), el("div", { class: "small muted", style: "font-weight:400", text: r[2] })));
+    });
+    app.append(rg, el("p", { class: "small", style: "margin:12px 0 0;color:var(--warn);font-weight:600", text: "Both teams count everything on their own. Do not share or compare numbers - the app compares them." }),
+      el("button", { class: "link", text: "← Back", onclick: function () { st.step = "confirm"; hooks.render(); } }));
+    return;
+  }
+  /* names */
+  var role = st.role, names = st.names || [], list = namesFor(st.branch, role === "fin" ? "Checker" : "Counter");
+  var startBtn = el("button", { class: "btn primary block", style: "margin-top:18px", text: "Start counting", onclick: go });
+  function upd() { startBtn.disabled = !names.length; startBtn.textContent = names.length ? "Start " + roleName(role).toLowerCase() : (role === "fin" ? "Add your name first" : "Add at least one name"); }
+  app.append(stepBar(2), el("h2", { text: role === "fin" ? "Your name" : "Who is counting?" }), el("p", { class: "small muted", text: st.branch + " · " + (role === "fin" ? "Finance" : "Operations") + (role === "ops" ? " · add everyone counting together on this phone" : "") }),
+    peoplePicker(list.mine, list.others, role === "ops", names, function (v) { names = v; st.names = v; upd(); }), startBtn,
+    el("button", { class: "link", text: "← Back", onclick: function () { st.step = "team"; hooks.render(); } }));
+  upd();
   async function go() {
     if (!names.length) return;
-    var other = Object.keys(S.mine.sessions).some(function (k2) { var x2 = S.mine.sessions[k2]; return x2.branch === pickBr && sessRole(x2) !== role && sessHasQty(x2); });
-    if (other && !isOwner()) { msg("Not allowed", "This phone already has a " + roleName(role === "ops" ? "fin" : "ops") + " for " + pickBr + ". Ops and Finance must count on different phones so the two counts stay independent."); return; }
+    var pickBr = st.branch;
     rememberNames(pickBr, role, names);
     var who = names.join(", "), data = { member: who, names: names.slice(), countedBy: role === "ops" ? who : "", startedAt: nowIso(), lines: {} };
     var existing = Object.keys(S.mine.sessions).filter(function (k2) { var x2 = S.mine.sessions[k2]; return x2.branch === pickBr && sessRole(x2) === role; })[0];
     if (existing) { var e0 = S.mine.sessions[existing]; data.lines = e0.lines; data.extraSkus = e0.extraSkus; data.startedAt = e0.startedAt; }
+    startBtn.disabled = true;
     try {
       var s = await rpc("counter_start", { p_token: tokenFor(pickBr), p_device: S.device, p_branch: pickBr, p_role: role, p_data: data });
       var loc = fromServer(s);
       if (existing && S.mine.sessions[existing].dirty) { loc.lines = S.mine.sessions[existing].lines; loc.dirty = true; }
-      S.mine.sessions[loc.id] = loc; S.mine.active = loc.id; S.step = ""; backup();
+      S.mine.sessions[loc.id] = loc; S.mine.active = loc.id; S.step = ""; S.start = null; backup();
       if (loc.dirty) touch();
       await loadBranch(pickBr).catch(function () { });
       hooks.render(); window.scrollTo(0, 0);
     } catch (e) {
+      startBtn.disabled = false;
       if (e.code === "AUTH") { delete S.tokens[pickBr]; saveTokens(); withPin(pickBr, go); return; }
+      if (e.code === "NOT_OPEN" || e.code === "CLOSED") { S.take = Object.assign({}, S.take || {}, { status: e.code === "CLOSED" ? "closed" : "draft" }); st.step = "confirm"; hooks.render(); return; }
       msg(e.code === "NOT_ALLOWED" ? "Not allowed" : "Can't start", errText(e));
     }
   }
-  draw();
 }
 function editCounters(m, locked) {
   if (locked) return; var r = sessRole(m), list = namesFor(m.branch, r === "fin" ? "Checker" : "Counter"), sel = (m.names && m.names.slice()) || (m.member ? m.member.split(/,\s*/) : []);
