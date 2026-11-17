@@ -108,6 +108,12 @@ export function buildWorkbook() {
   return wb;
 }
 
+function logoData() {
+  return fetch("assets/logo.png").then(function (r) { return r.ok ? r.blob() : null; }).then(function (bl) {
+    return bl ? new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = function () { res(null); }; fr.readAsDataURL(bl); }) : null;
+  }).catch(function () { return null; });
+}
+
 export async function signoffPdf(b) {
   openModal(function (sh) { sh.append(el("h3", { text: "Preparing sign-off PDF…" }), el("p", { class: "muted", text: b })); });
   var J; try { J = await pdfLibs(); } catch (e) { return fail(e); }
@@ -117,6 +123,12 @@ export async function signoffPdf(b) {
   var allSub = ops.length && fin.length && ses.every(function (d) { return d.status === "submitted"; }), open = (lc.RECOUNT || 0) + (lc["WAITING OPS"] || 0) + (lc["WAITING FINANCE"] || 0) + (lc["NEEDS PCS FACTOR"] || 0), final = allSub && !open;
   var title = (S.adm.settings && S.adm.settings.title) || "NDD Stock Count", tk = currentTake();
   var d = new J({ unit: "mm", format: "a4" }), W = 210, y = 16, F = function (n) { return fmt(n); }, R = function (n) { return n == null ? "" : fmt(n, 2); };
+  /* company header: logo + name, red rule */
+  var logo = await logoData(), lx = 14;
+  if (logo) { try { d.addImage(logo, "PNG", 14, 8, 19.5, 12); lx = 37; } catch (e) { } }
+  d.setFont("helvetica", "bold"); d.setFontSize(14); d.text("Nabati Food Malaysia", lx, 14.5);
+  d.setFont("helvetica", "normal"); d.setFontSize(8.5); d.setTextColor(110); d.text("Stock count sign-off", lx, 19); d.setTextColor(0);
+  d.setDrawColor(181, 18, 27); d.setLineWidth(0.6); d.line(14, 23, W - 14, 23); d.setLineWidth(0.2); d.setDrawColor(0); y = 31;
   d.setFont("helvetica", "bold"); d.setFontSize(15); d.text(title + " - Count Sign-off", 14, y); y += 7;
   d.setFontSize(12); d.text(b + (tk.name ? "  ·  " + tk.name : ""), 14, y); d.setFont("helvetica", "normal"); d.setFontSize(9);
   var subs = ses.map(function (x) { return x.submittedAt || ""; }).filter(Boolean).sort();
