@@ -216,10 +216,9 @@ export function renderSetup(app) {
 
 function renderTeam(app) {
   var A = S.adm;
-  var bt = el("textarea", { style: "min-height:90px" }); bt.value = branchesAdm().join("\n");
   var rows = (A.team || []).map(function (t) { return { name: t.name, branch: t.branch, role: t.role === "Counter" ? "Counter" : "Checker" }; });
   var box = el("div");
-  function brList() { return bt.value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean).sort(function (a, b) { return a.localeCompare(b); }); }
+  function brList() { return branchesAdm(); }
   function saveTeam(done) {
     var b = brList(); var tm = rows.filter(function (r) { return r.name; }).map(function (x) { return { name: x.name, branch: x.branch, role: x.role }; });
     return rpc("admin_save_team", { p_token: S.admin.token, p_branches: b, p_team: tm }).then(function () { return loadAdmin(); }).then(function () { done && done(); }).catch(function (e) { msg("Save failed", errText(e)); });
@@ -255,9 +254,9 @@ function renderTeam(app) {
       line.append(el("button", { class: "chip", style: "padding:4px 10px", text: "+", onclick: function () { edit({ name: "", branch: b, role: "Counter" }, true); } }));
       box.append(line);
     });
-    if (!bl.length) box.append(el("p", { class: "small muted", text: "No branches yet. Tap “Edit branch list”, add one per line (same as SAP Name 1), then Save branches." }));
+    if (!bl.length) box.append(el("p", { class: "small muted", text: "No branches yet - upload the MB52 above and they are created from SAP “Name 1”." }));
     var lost = rows.filter(function (r) { return bl.indexOf(r.branch) < 0; });
-    if (lost.length) box.append(el("p", { class: "small", style: "color:var(--bad)", text: "Not in a branch: " + lost.map(function (r) { return r.name; }).join(", ") + " - tap Save branches, then fix." }));
+    if (lost.length) box.append(el("p", { class: "small", style: "color:var(--bad)", text: "Not in a branch: " + lost.map(function (r) { return r.name; }).join(", ") + " - remove or move them." }));
   }
   var paste = el("textarea", { placeholder: "Paste 3 columns from Excel: Name | Branch | Role (Counter / Checker)", style: "min-height:70px" });
   var pasteBox = el("div", { class: "hidden", style: "margin-top:6px" }, paste, el("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" }, el("button", { class: "btn", text: "Replace team with pasted list", onclick: function () {
@@ -267,10 +266,7 @@ function renderTeam(app) {
     rows = tm; paste.value = ""; pasteBox.classList.add("hidden"); saveTeam(function () { draw(); msg("Saved", tm.length + " people."); });
   } })));
   draw();
-  var brBox = el("div", { class: "hidden", style: "margin-top:8px" }, el("p", { class: "small muted", text: "One per line, same as SAP Name 1" }), bt,
-    el("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" }, el("button", { class: "btn", text: "Save branches", onclick: function () { saveTeam(function () { hooks.render(); msg("Saved"); }); } })));
-  app.append(el("div", { class: "card" }, el("h3", { text: "Team" }),
-    el("p", { class: "small muted", text: "Tap a name to edit, move or remove. + to add. Saves straight away." }), box,
-    el("div", { class: "row", style: "gap:14px;margin-top:8px" }, el("button", { class: "link", text: "Paste from Excel", onclick: function () { pasteBox.classList.toggle("hidden"); } }),
-      el("button", { class: "link", text: "Edit branch list", onclick: function () { brBox.classList.toggle("hidden"); } })), pasteBox, brBox));
+  app.append(el("div", { class: "card" }, el("h3", { text: "Team (optional)" }),
+    el("p", { class: "small muted", text: "Not required: counters can type their name and the phone remembers it. Add names here only if you want them to just tap. Branches come from the MB52 upload." }), box,
+    el("div", { class: "row", style: "gap:14px;margin-top:8px" }, el("button", { class: "link", text: "Paste from Excel", onclick: function () { pasteBox.classList.toggle("hidden"); } })), pasteBox));
 }

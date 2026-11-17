@@ -344,8 +344,8 @@ function renderStart(app) {
     app.append(el("div", { class: "card center" },
       el("h2", { text: first ? "Welcome - first-time setup" : "Not ready for counting yet" }),
       el("p", { class: "muted", text: first
-        ? "Nobody has set up this app yet. The owner sets a password with the one-time setup code, then adds branches, team, PINs and the SAP MB52 in Setup."
-        : "Finance hasn't added the branches yet. Finance: tap the button below and log in, then go to Setup." }),
+        ? "Nobody has set up this app yet. The owner sets a password with the one-time setup code, then uploads the SAP MB52 in Setup."
+        : "No branches yet. Finance: log in, go to Setup and upload the SAP MB52 - branches are created from it." }),
       el("button", { class: "btn primary", text: first ? "Start first-time setup" : "🔒 Finance login", onclick: function () { if (hooks.openLogin) hooks.openLogin(first); } }),
       el("p", { class: "small muted", style: "margin-top:12px", text: "Counters: once Finance finishes Setup, your branch appears here. Ask Finance for your branch PIN." })));
     return;
