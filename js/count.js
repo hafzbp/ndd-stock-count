@@ -1,5 +1,5 @@
 /* Counter screens: pick role/branch/names, count by SKU and batch, submit with signatures and photos. */
-import { S, hooks, cur, touch, flush, tokenFor, saveTokens, backup, fromServer, isAdmin, isOwner, sessHasQty, store } from "./state.js";
+import { S, hooks, cur, touch, flush, schedule, tokenFor, saveTokens, backup, fromServer, isAdmin, isOwner, sessHasQty, store } from "./state.js";
 import { rpc } from "./api.js";
 import { $, el, fmt, MON, bLabel, nowIso, tsTxt, openModal, closeModal, msg, confirmBox, numPad, sigPad, toast, errText } from "./ui.js";
 import { toPcs, hasQty, lk, monthOf, sessRole } from "./pure.js";
@@ -353,7 +353,7 @@ function renderStart(app) {
       var cg = el("div", { class: "grid", style: "margin-bottom:18px" });
       keys.forEach(function (k) {
         var x = ss[k], n = Object.keys(x.lines || {}).filter(function (j) { return hasQty(x.lines[j]); }).length;
-        cg.append(el("button", { class: "big" + (S.mine.active === k ? " on" : ""), onclick: function () { withPin(x.branch, function () { S.mine.active = k; S.step = ""; S.start = null; backup(); hooks.render(); window.scrollTo(0, 0); }); } },
+        cg.append(el("button", { class: "big" + (S.mine.active === k ? " on" : ""), onclick: function () { withPin(x.branch, function () { S.mine.active = k; S.step = ""; S.start = null; backup(); hooks.render(); window.scrollTo(0, 0); schedule(200); }); } },
           el("div", { text: x.branch }), el("div", { class: "small", style: "font-weight:700;color:" + (sessRole(x) === "fin" ? "var(--accent)" : "var(--ok)"), text: roleName(sessRole(x)).toUpperCase() }),
           el("div", { class: "small muted", style: "font-weight:400", text: x.member }),
           el("div", { class: "small muted", style: "font-weight:400", text: n + " line" + (n === 1 ? "" : "s") + (x.status === "submitted" ? " · submitted ✓" : "") })));

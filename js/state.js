@@ -114,6 +114,7 @@ export async function flush() {
   S.saving = true; syncPill();
   for (var i = 0; i < dirty.length; i++) {
     var m = dirty[i], tok = tokenFor(m.branch), stamp = m.updatedAt;
+    if (!tok && S.mine.active !== m.id) continue;
     if (!tok) { S.saving = false; S.saveErr = "PIN"; syncPill(); if (hooks.needPin) hooks.needPin(m.branch); return; }
     try {
       var r = await rpc("counter_save", { p_token: tok, p_device: S.device, p_id: m.id, p_data: dataOf(m) });
@@ -134,14 +135,16 @@ export async function flush() {
     }
   }
   S.saving = false; backup(); syncPill();
-  if (Object.keys(S.mine.sessions).some(function (k) { return S.mine.sessions[k].dirty; })) schedule(400);
+  if (Object.keys(S.mine.sessions).some(function (k) { var x = S.mine.sessions[k]; return x.dirty && tokenFor(x.branch); })) schedule(400);
 }
 
 export function anyDirty() { return Object.keys(S.mine.sessions).some(function (k) { return S.mine.sessions[k].dirty; }); }
 export function syncPill() {
-  if (S.saveErr === "PIN") return pill("PIN needed to save", "bad");
+  if (S.saveErr === "PIN") return pill("Plant code needed to save", "bad");
   if (S.saveErr) return pill("Offline - kept on phone", "warn");
-  if (S.saving || anyDirty()) return pill("Saving…");
+  var dz = Object.keys(S.mine.sessions).map(function (k) { return S.mine.sessions[k]; }).filter(function (x) { return x.dirty; });
+  if (S.saving || dz.some(function (x) { return tokenFor(x.branch); })) return pill("Saving…");
+  if (dz.length) return pill("Kept on phone", "warn");
   if (!Object.keys(S.mine.sessions).length) return pill("Online", "ok");
   pill("All saved ✓", "ok");
 }

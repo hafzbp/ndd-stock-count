@@ -1,7 +1,7 @@
 /* App shell: start-up, header, tabs, admin/owner login, sync loop, in-app browser screen. */
 import { S, hooks, loadLocal, saveTokens, sync, flush, syncPill, cur, isAdmin, isOwner, anyDirty, backup } from "./state.js";
 import { rpc } from "./api.js";
-import { $, el, pill, msg, openModal, closeModal, errText, labelTables } from "./ui.js";
+import { $, el, pill, msg, openModal, closeModal, errText, labelTables, confirmBox, toast } from "./ui.js";
 import { renderCount, withPin, loadMaster, loadBranch, roleName } from "./count.js";
 import { renderMaster, loadAdmin } from "./master.js";
 import { renderSetup } from "./setup.js";
@@ -38,8 +38,26 @@ function drawHeader() {
       tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", text: t[1], onclick: function () { S.tab = t[0]; if (t[0] === "home") S.viewTake = null; if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }));
     });
   } else { tabs.classList.add("hidden"); S.tab = "count"; }
-  var lk = $("#lockBtn");
-  lk.replaceChildren(isAdmin() ? "🔓" : "🔒", el("span", { class: "lbl", text: isAdmin() ? " Log out" : " Admin" })); lk.title = isAdmin() ? "Log out" : "Admin login";
+  var lk = $("#lockBtn"), cm = counterMode();
+  $("#dashBtn").style.display = cm ? "none" : "";
+  if (cm) { lk.replaceChildren("Log out"); lk.title = "Log out of " + cur().branch + " (your counts stay saved)"; }
+  else { lk.replaceChildren(isAdmin() ? "🔓" : "🔒", el("span", { class: "lbl", text: isAdmin() ? " Log out" : " Admin" })); lk.title = isAdmin() ? "Log out" : "Admin login"; }
+}
+/* a counter is inside a count on this phone: header shows only Log out */
+function counterMode() { var m = cur(); return !isAdmin() && !!m && !!S.tokens[m.branch]; }
+
+async function counterLogout() {
+  var m = cur(), br = m.branch;
+  confirmBox("Log out of " + br + "?", "Your counts stay saved. To continue later, open the app and log in again with the plant code - you carry on where you stopped.", "Log out", async function () {
+    clearTimeout(S.timer); try { await flush(); } catch (e) { }
+    S.saveErr = null;
+    var waiting = Object.keys(S.mine.sessions).filter(function (k) { var x = S.mine.sessions[k]; return x.branch === br && x.dirty; }).length;
+    var t = S.tokens[br]; delete S.tokens[br]; saveTokens();
+    S.mine.active = null; S.start = { step: "code" }; S.step = ""; backup(); render(); window.scrollTo(0, 0);
+    if (t) rpc("logout", { p_token: t }).catch(function () { });
+    if (waiting) msg("Logged out", "Some changes have not uploaded yet (no signal). They are kept on this phone and upload as soon as you log in again with the plant code. Don't clear the browser data on this phone.");
+    else toast("Logged out. Your counts are saved.");
+  });
 }
 function adminErr(e) {
   if (e && e.code === "AUTH") { S.admin = null; saveTokens(); S.tab = "count"; render(); msg("Signed out", "Your admin login expired or the password was changed. Log in again."); }
@@ -47,6 +65,7 @@ function adminErr(e) {
 }
 
 function onLockBtn() {
+  if (counterMode()) { counterLogout(); return; }
   if (isAdmin()) {
     var t = S.admin.token; S.admin = null; S.adm = null; S.viewTake = null; S.wiz = null; S.wizNew = false; saveTokens(); S.tab = "count"; render();
     rpc("logout", { p_token: t }).catch(function () { });
