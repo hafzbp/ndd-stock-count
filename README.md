@@ -24,6 +24,14 @@ the app compares both and then compares the agreed count to SAP MB52.
 3. **Close counting:** results per warehouse, Excel, sign-off PDF per warehouse, dashboard variance (by level).
 4. **Start new stock take:** the old one moves to History (read-only).
 
+## Daily cycle count (DCC)
+- **HQ (Daily tab):** upload the MB52 every day (one file, all plants, with RM values). Each NDD then gets a short list per working day.
+- **The list:** ABC per NDD per month by stock value (A = first 80%, B = next 15%, C = rest; worked out on the 1st). Monthly targets A 4×, B 2×, C 1× are spread over the remaining working days; SKUs outside tolerance yesterday come back as recounts (R). Supervisors can add SKUs (S). Single count.
+- **Supervisor:** "Warehouse supervisor? Log in here" → plant code + PIN (HQ creates it in Settings; supervisor must change it at first login). Sees own warehouse, adds SKUs, skips a day with a reason, 30-day history, ABC plan.
+- **Settings:** rules, working days and count window per NDD (late = submitted after the window), supervisor PINs.
+- **Dashboard tab / public page:** counted today, coverage, accuracy (IRA), compliance grid, trends, per-warehouse table, top variance (RM only after login).
+- An open monthly stock take at a warehouse pauses its daily count. Yesterday's count closes automatically the next day.
+
 ## How it is built (so it is easy to extend)
 ```
 index.html, css/app.css
@@ -54,7 +62,7 @@ and owner passwords are stored as bcrypt hashes.
 ## Tests
 ```
 cd tests && npm i
-node backend.test.mjs                         # 30 checks on the real SQL (PGlite)
+node backend.test.mjs   # + python3 ui_test.py and python3 ui_daily.py (UI, local server)                         # 30 checks on the real SQL (PGlite)
 BOOTSTRAP_CODE=SETUP-123 node server.mjs &     # local backend on :8787
 python3 ui_test.py                             # 49 end-to-end checks, needs Playwright + Chrome
 ```
