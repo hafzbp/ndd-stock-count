@@ -1,6 +1,7 @@
 /* Public live dashboard: no login. What it shows is set by Finance in Setup → Public dashboard. */
 import { rpc } from "../js/api.js";
 import { el, fmt, tsTxt } from "../js/ui.js";
+import { renderDccStats } from "../js/dcc.js";
 
 var $ = function (s) { return document.querySelector(s); };
 var ST = { not_started: ["Not started", ""], counting: ["Counting", "warn"], submitted: ["Submitted ✓", "ok"] };
@@ -15,8 +16,10 @@ function kpi(v, l, cls) { return el("div", { class: "kpi" }, el("b", { class: cl
 function draw(d) {
   document.title = (d.title || "Stock Count") + " · Dashboard";
   $("#title").textContent = (d.title || "Stock Count") + " · Live dashboard";
-  $("#sub").textContent = (d.take || "") + (d.scope === "partial" ? " · partial, " + d.skuCount + " SKUs" : "") + (d.mode === "single" ? " · single count" : "") + " · " + (d.status === "draft" ? "not started yet" : d.status === "closed" ? "counting closed" : "counting open") + " · updated " + tsTxt(d.generatedAt);
-  var B = d.branches || [], app = $("#app"); app.innerHTML = "";
+  $("#sub").textContent = "Daily cycle count and monthly stock take · updated " + tsTxt(d.generatedAt);
+  var mt = (d.take || "") + (d.scope === "partial" ? " · partial, " + d.skuCount + " SKUs" : "") + (d.mode === "single" ? " · single count" : "") + " · " + (d.status === "draft" ? "not started yet" : d.status === "closed" ? "counting closed" : "counting open") + " · updated " + tsTxt(d.generatedAt);
+  var B = d.branches || [], app = $("#monthly"); app.innerHTML = "";
+  app.append(el("h2", { class: "sec", text: "Monthly stock take · " + mt }));
   var sg = d.mode === "single";
   /* single count: one team, whichever role it picked */
   if (sg) B.forEach(function (b) { var s = [b.ops, b.fin]; b.one = s.indexOf("counting") >= 0 ? "counting" : s.indexOf("submitted") >= 0 ? "submitted" : "not_started"; b.oneDone = Math.max(b.opsDone, b.finDone); });
@@ -58,8 +61,15 @@ function draw(d) {
   app.append(g);
 }
 
+var lastDcc = 0;
+async function loadDcc() {
+  var d = await rpc("public_dcc", {}), root = $("#dcc"); root.innerHTML = "";
+  root.append(el("h2", { class: "sec", text: "Daily cycle count · this month" }));
+  if (!(d.branches || []).some(function (b) { return b.universe; })) root.append(el("div", { class: "note", text: "Daily counts start after HQ uploads the first daily stock file." }));
+  renderDccStats(root, d, {}); lastDcc = Date.now();
+}
 async function load() {
-  try { var d = await rpc("public_dashboard", {}); draw(d); $("#live").textContent = "● Live"; $("#live").className = "pill ok"; }
+  try { if (Date.now() - lastDcc > 120000) await loadDcc(); var d = await rpc("public_dashboard", {}); draw(d); $("#live").textContent = "● Live"; $("#live").className = "pill ok"; }
   catch (e) { $("#live").textContent = "Offline - retrying"; $("#live").className = "pill warn"; if (!$("#app").children.length || /Loading/.test($("#app").textContent)) $("#app").innerHTML = '<div class="center muted">Can\'t reach the server. Retrying…</div>'; }
 }
 load(); setInterval(function () { if (!document.hidden) load(); }, 30000);

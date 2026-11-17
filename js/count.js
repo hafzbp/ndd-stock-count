@@ -85,7 +85,8 @@ export function renderCount(app) {
   var locked = m.status === "submitted" || (closed() && !isAdmin());
   if (closed() && !isAdmin()) app.append(el("div", { class: "banner warn", text: tstatus() === "draft" ? "Counting hasn't started yet. Your admin will open it." : "Counting is closed." }));
   else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + ". Ask your admin to reopen if anything needs changing." }));
-  if (S.take && S.take.scope === "partial") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Partial count · " + (bd.codes || []).length + " SKU(s) to count at this warehouse"));
+  if (S.take && S.take.kind === "daily") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Today's cycle count · " + (bd.codes || []).length + " SKU(s) on the list"));
+  else if (S.take && S.take.scope === "partial") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Partial count · " + (bd.codes || []).length + " SKU(s) to count at this warehouse"));
   if (singleMode()) app.append(el("div", { class: "banner", style: "background:var(--okbg);color:var(--ok)" }, "COUNT - count every SKU and batch you find, then submit."));
   else app.append(el("div", { class: "banner", style: "background:" + (sessRole(m) === "fin" ? "var(--badbg);color:var(--accent)" : "var(--okbg);color:var(--ok)") },
     (sessRole(m) === "fin" ? "FINANCE CHECK" : "OPS COUNT") + " - count everything yourself. Do not share or compare numbers with the other team."));
@@ -363,7 +364,8 @@ function renderStart(app) {
     app.append(stepBar(0), el("div", { class: "card", style: "max-width:420px;margin:0 auto" },
       plantPad("Enter your warehouse plant code", "The SAP plant code of the warehouse you are counting, for example 1508.", null, function (br) {
         S.start = { step: "confirm", branch: br }; hooks.render(); window.scrollTo(0, 0);
-      }, true)));
+      }, true)),
+      el("p", { class: "center small", style: "margin-top:14px" }, el("button", { class: "link", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })));
     return;
   }
   if (st.step === "confirm") {
@@ -371,15 +373,15 @@ function renderStart(app) {
     app.append(stepBar(0));
     if (ts !== "open") {
       app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: st.branch }),
-        el("h2", { text: ts === "draft" ? "Counting hasn't started yet" : "Counting is closed" }),
-        el("p", { class: "muted", text: ts === "draft" ? "Your admin will open the stock take. Try again when they tell you it's open." : "This stock take is finished. Ask your admin if something still needs counting." }),
+        el("h2", { text: S.notOpenMsg ? (ts === "draft" ? "Nothing to count right now" : "Today's count is closed") : ts === "draft" ? "Counting hasn't started yet" : "Counting is closed" }),
+        el("p", { class: "muted", text: S.notOpenMsg || (ts === "draft" ? "Your admin will open the stock take. Try again when they tell you it's open." : "This stock take is finished. Ask your admin if something still needs counting.") }),
         el("div", { class: "row", style: "justify-content:center" },
-          el("button", { class: "btn primary", text: "Try again", onclick: async function () { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e) { } hooks.render(); } }),
+          el("button", { class: "btn primary", text: "Try again", onclick: async function () { S.notOpenMsg = ""; try { var bd = await rpc("counter_branch", { p_token: S.tokens[st.branch], p_branch: st.branch }); S.take = bd.take; } catch (e) { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e2) { } } hooks.render(); } }),
           el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
       return;
     }
     app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: "Your warehouse" }), el("h2", { style: "font-size:24px;margin:6px 0 14px", text: st.branch }),
-      S.take && S.take.scope === "partial" ? el("p", { class: "small", text: "Partial count: only the SKUs your admin picked." }) : null,
+      S.take && S.take.kind === "daily" ? el("p", { class: "small", text: "Today's cycle count: " + S.take.skuCount + " SKU(s) on the list." }) : S.take && S.take.scope === "partial" ? el("p", { class: "small", text: "Partial count: only the SKUs your admin picked." }) : null,
       el("div", { class: "row", style: "justify-content:center" },
         el("button", { class: "btn primary", text: "Yes, that's my warehouse", onclick: function () { if (singleMode()) { st.role = "ops"; st.names = st.names || []; st.step = "names"; } else st.step = "team"; hooks.render(); } }),
         el("button", { class: "btn", text: "No, enter again", onclick: reset }))));
@@ -426,7 +428,7 @@ function renderStart(app) {
     } catch (e) {
       startBtn.disabled = false;
       if (e.code === "AUTH") { delete S.tokens[pickBr]; saveTokens(); withPin(pickBr, go); return; }
-      if (e.code === "NOT_OPEN" || e.code === "CLOSED") { S.take = Object.assign({}, S.take || {}, { status: e.code === "CLOSED" ? "closed" : "draft" }); st.step = "confirm"; hooks.render(); return; }
+      if (e.code === "NOT_OPEN" || e.code === "CLOSED") { var em = String(e.message || ""); S.notOpenMsg = /Nothing to count|skipped/.test(em) ? em.replace(/^(NOT OPEN|CLOSED):\s*/, "") : ""; S.take = Object.assign({}, S.take || {}, { status: e.code === "CLOSED" ? "closed" : "draft" }); st.step = "confirm"; hooks.render(); return; }
       msg(e.code === "NOT_ALLOWED" ? "Not allowed" : "Can't start", errText(e));
     }
   }

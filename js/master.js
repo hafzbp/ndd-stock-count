@@ -55,7 +55,9 @@ function stat(n, l) { return el("div", { class: "stat" }, el("b", { text: fmt(n)
 export function renderMaster(app) {
   if (!S.adm) { app.append(el("p", { class: "center muted", text: "Loading…" })); loadAdmin().then(hooks.render, function (e) { msg("Can't load", errText(e)); }); return; }
   var br = branchesAdm(), docs = S.counts, tk = currentTake();
-  if (ro()) app.append(el("div", { class: "banner warn row", style: "justify-content:space-between" }, el("span", { text: "History (read-only): " + (tk.name || "") }),
+  if (ro() && tk.kind === "daily") app.append(el("div", { class: "banner warn row", style: "justify-content:space-between" }, el("span", { text: "Daily count (read-only): " + (tk.branch || "") + " · " + (tk.name || "").replace(/^Daily /, "") }),
+    el("button", { class: "btn", text: "Back to Daily", onclick: function () { S.viewTake = null; S.tab = "daily"; loadAdmin().then(hooks.render); } })));
+  else if (ro()) app.append(el("div", { class: "banner warn row", style: "justify-content:space-between" }, el("span", { text: "History (read-only): " + (tk.name || "") }),
     el("button", { class: "btn", text: "Back to current", onclick: function () { S.viewTake = null; loadAdmin().then(hooks.render); } })));
   else if (tk.status === "draft") { app.append(el("div", { class: "card center" }, el("h2", { text: "Counting isn't open yet" }), el("p", { class: "muted", text: "Finish setting up " + (tk.name || "the stock take") + " in the Stock take tab, then open counting." }), el("button", { class: "btn primary", text: "Go to setup", onclick: function () { S.tab = "home"; hooks.render(); } }))); return; }
   br = br.filter(function (b) { return (S.sysBy[b] || []).length || docs.some(function (d) { return d.branch === b; }); });

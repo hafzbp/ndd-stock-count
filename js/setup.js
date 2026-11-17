@@ -24,11 +24,13 @@ function readSheet(file) {
   });
 }
 
-/* MB52 upload card (used by the stock take wizard and when replacing the MB52 of an open stock take). */
-export function mb52Card(title, onDone) {
+/* MB52 upload card (stock take wizard, replacing the MB52 of an open stock take, and the daily stock upload).
+   opts.daily: { date: () => "YYYY-MM-DD", info: text } → loads the file as the daily stock for that date. */
+export function mb52Card(title, onDone, opts) {
+  opts = opts || {};
   var A = S.adm, f = el("input", { type: "file", accept: ".xlsx,.xls,.csv" });
-  var sysTxt = Object.keys(S.sysBy || {}).length ? Object.keys(S.sysBy).length + " branch(es) loaded" + (A.meta ? " · uploaded " + tsTxt(A.meta.loadedAt) : "") : "Nothing uploaded yet";
-  var c = el("div", { class: "card" }, el("h3", { text: title }),
+  var sysTxt = opts.daily ? opts.daily.info : Object.keys(S.sysBy || {}).length ? Object.keys(S.sysBy).length + " branch(es) loaded" + (A.meta ? " · uploaded " + tsTxt(A.meta.loadedAt) : "") : "Nothing uploaded yet";
+  var c = el("div", { class: "card" }, el("h3", { text: title }), opts.daily && opts.daily.extra ? opts.daily.extra : null,
     el("p", { class: "small muted", text: "SAP MB52: Plant 1501-1515, tick Display Batch Stocks + No zero stock lines, Non-Hierarchical, Export → Spreadsheet. Each row goes to its warehouse by plant code (new plants by “Name 1”). The stock report layout (SKU / PLANT DISCRIPTION / Total in PCS) also works, but has no RM values. GOOD stock only: Blocked Stock, bad-stock locations (BS00/BS01/SH00) and Stock in Transit are left out." }), f,
     el("p", { class: "small", style: "margin-top:8px;font-weight:600", text: sysTxt }));
   f.addEventListener("change", async function () {
@@ -49,7 +51,7 @@ export function mb52Card(title, onDone) {
       }
       var res = parseMB52(rows, branchesAdm(), pm), plants = res.plants;
       var skip = Object.keys(res.skipped).map(function (k) { return k + " RM" + fmt(res.skipped[k], 2); }).join(", ");
-      var ti = S.adm.takeInfo || {}, picked = ti.scope === "partial" ? (ti.skus || []) : null, inFile = {};
+      var ti = opts.daily ? {} : (S.adm.takeInfo || {}), picked = ti.scope === "partial" ? (ti.skus || []) : null, inFile = {};
       Object.keys(res.byBr).forEach(function (b) { res.byBr[b].forEach(function (r) { inFile[r[0]] = 1; }); });
       var missingPicked = picked ? picked.filter(function (c0) { return !inFile[c0]; }) : [];
       confirmBox("Load MB52?", res.lines + " lines for " + Object.keys(res.byBr).length + " branch(es). Qty " + fmt(res.totQ, 0) + " PCS" + (res.hasValue ? ", RM " + fmt(res.totV, 2) : "") + "." +
@@ -57,14 +59,14 @@ export function mb52Card(title, onDone) {
         (res.transit ? "\nStock in transit left out: " + fmt(res.transit, 0) + " PCS" : "") + (res.format === "mb52" ? "\nGood stock only. Left out: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" : "") +
         (missingPicked.length ? "\n\n" + missingPicked.length + " picked SKU(s) are not in this MB52 at any branch: " + missingPicked.slice(0, 8).join(", ") : "") +
         (res.format === "report" ? "\n\nStock report format (SKU / Total in PCS). " + (res.hasValue ? "" : "It has no RM values, so variance shows in PCS only.") : "") +
-        "\n\nReplaces system stock for these branches.", "Load", async function () {
+        (opts.daily ? "\n\nThis becomes the system stock dated " + opts.daily.date() + " for daily counts." : "\n\nReplaces system stock for these branches."), "Load", async function () {
           var skV = 0; Object.keys(res.skipped).forEach(function (k) { skV += res.skipped[k]; });
           pill("Loading MB52…");
           try {
-            await rpc("admin_load_mb52", { p_token: tok(), p_payload: { meta: { goodV: res.totV, goodQ: res.totQ, blockedV: res.exBlkV, badLocV: res.exBadV, transitV: res.trV, skippedV: skV, skipped: Object.keys(res.skipped), lines: res.lines }, byBr: res.byBr, descs: res.descs, plants: plants } });
+            await rpc(opts.daily ? "admin_load_daily" : "admin_load_mb52", Object.assign(opts.daily ? { p_date: opts.daily.date() } : {}, { p_token: tok(), p_payload: { meta: { goodV: res.totV, goodQ: res.totQ, blockedV: res.exBlkV, badLocV: res.exBadV, transitV: res.trV, skippedV: skV, skipped: Object.keys(res.skipped), lines: res.lines }, byBr: res.byBr, descs: res.descs, plants: plants } }));
             await loadAdmin(); pill("Online", "ok");
             var noFac = (S.adm.skus || []).filter(function (s0) { return inFile[s0.code] && !s0.per; }).map(function (s0) { return s0.code; });
-            msg("MB52 loaded", Object.keys(res.byBr).length + " branch(es), plant codes ready for counter login." + (noFac.length ? "\n\n" + noFac.length + " SKU(s) have no pcs per carton yet (" + noFac.slice(0, 6).join(", ") + (noFac.length > 6 ? "…" : "") + "). Add them in Settings → Pcs per Carton / Box, or counters can only count those in pieces." : ""));
+            msg(opts.daily ? "Daily stock loaded" : "MB52 loaded", Object.keys(res.byBr).length + " branch(es)" + (opts.daily ? ", stock date " + opts.daily.date() + "." + (res.hasValue ? "" : "\n\nThis file has no RM values: ABC classes use quantity instead of value.") : ", plant codes ready for counter login.") + (noFac.length ? "\n\n" + noFac.length + " SKU(s) have no pcs per carton yet (" + noFac.slice(0, 6).join(", ") + (noFac.length > 6 ? "…" : "") + "). Add them in Settings → Pcs per Carton / Box, or counters can only count those in pieces." : ""));
             onDone && onDone();
           } catch (e) { pill("Error", "bad"); msg("Load failed", errText(e)); }
         });
@@ -95,6 +97,7 @@ export function renderSetup(app) {
   if (!S.adm) { app.append(el("p", { class: "center muted", text: "Loading…" })); loadAdmin().then(hooks.render); return; }
   var A = S.adm, st = A.settings || {}, tk = currentTake();
   app.append(el("div", { class: "banner warn", text: "Admin only. Settings that stay the same between stock takes. Counters never see system quantities." }));
+  app.append(dccCard(A, st));
 
   /* 2. factors */
   var fa = el("textarea", { placeholder: "Item Code\tPcs per CTN\tPcs per BOX\n650505\t240\t24" });
@@ -266,4 +269,46 @@ function renderTeam(app) {
   app.append(el("div", { class: "card" }, el("h3", { text: "Team (optional)" }),
     el("p", { class: "small muted", text: "Not required: counters can type their name and the phone remembers it. Add names here only if you want them to just tap. Branches come from the MB52 upload." }), box,
     el("div", { class: "row", style: "gap:14px;margin-top:8px" }, el("button", { class: "link", text: "Paste from Excel", onclick: function () { pasteBox.classList.toggle("hidden"); } })), pasteBox));
+}
+
+/* Daily cycle count: rules, working days and count window per warehouse, supervisor PINs. */
+var WD = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"]];
+function dccCard(A, st) {
+  var abc = st.dcc_abc || { a: 80, b: 95 }, tg = st.dcc_target || { A: 4, B: 2, C: 1 };
+  var on = el("input", { type: "checkbox", checked: st.dcc_enabled !== false });
+  var ia = el("input", { type: "number", min: 1, max: 98, value: abc.a, style: "width:80px" }), ib = el("input", { type: "number", min: 2, max: 99, value: abc.b, style: "width:80px" });
+  var tA = el("input", { type: "number", min: 1, max: 31, value: tg.A, style: "width:70px" }), tB = el("input", { type: "number", min: 1, max: 31, value: tg.B, style: "width:70px" }), tC = el("input", { type: "number", min: 1, max: 31, value: tg.C, style: "width:70px" });
+  var c = el("div", { class: "card" }, el("h3", { text: "Daily cycle count" }),
+    el("label", { class: "row", style: "gap:8px" }, on, el("span", { text: "Daily counts on (each warehouse gets a short list every working day once daily stock is uploaded)" })),
+    el("p", { class: "small muted", style: "margin-top:10px", text: "ABC per warehouse, worked out on the 1st of each month from the latest daily stock: SKUs sorted by stock value; A = SKUs that make up the first A% of value, B = up to B%, C = the rest." }),
+    el("div", { class: "row" }, el("span", { class: "small", text: "A up to" }), ia, el("span", { class: "small", text: "% · B up to" }), ib, el("span", { class: "small", text: "%" })),
+    el("p", { class: "small muted", style: "margin-top:10px", text: "How often each class is counted per month. The daily list spreads what is still due over the remaining working days." }),
+    el("div", { class: "row" }, el("span", { class: "small", text: "A" }), tA, el("span", { class: "small", text: "× · B" }), tB, el("span", { class: "small", text: "× · C" }), tC, el("span", { class: "small", text: "× per month" })),
+    el("div", { class: "row", style: "justify-content:flex-end;margin-top:8px" }, el("button", { class: "btn primary", text: "Save rules", onclick: function () {
+      call("admin_settings", { p_patch: { dcc_enabled: on.checked, dcc_abc: { a: Number(ia.value), b: Number(ib.value) }, dcc_target: { A: Number(tA.value), B: Number(tB.value), C: Number(tC.value) } } }, "Daily count rules saved. New ABC limits apply from next month's classification.").catch(function () { });
+    } })));
+  var t = el("table", {}, el("tr", {}, ["Warehouse", "Working days", "Count window", "Supervisor PIN", ""].map(function (h) { return el("th", { text: h }); })));
+  (A.branches || []).filter(function (b) { return b.active; }).forEach(function (b) {
+    var days = {}; (b.workDays || []).forEach(function (d) { days[d] = 1; });
+    var chips = el("div", { class: "row", style: "gap:3px;flex-wrap:nowrap" }, WD.map(function (w) {
+      var x = el("button", { class: "chip" + (days[w[0]] ? " on" : ""), text: w[1].slice(0, 2), title: w[1], onclick: function () { if (days[w[0]]) delete days[w[0]]; else days[w[0]] = 1; x.classList.toggle("on"); } }); return x;
+    }));
+    var f = el("input", { type: "time", value: b.from || "07:00", style: "width:105px" }), to = el("input", { type: "time", value: b.to || "10:00", style: "width:105px" });
+    t.append(el("tr", {}, el("td", { text: b.name }), el("td", {}, chips), el("td", {}, el("div", { class: "row", style: "gap:4px;flex-wrap:nowrap" }, f, el("span", { text: "-" }), to)),
+      el("td", {}, el("span", { class: "pill " + (b.supPin ? (b.supMustChange ? "warn" : "ok") : ""), text: b.supPin ? (b.supMustChange ? "Not changed yet" : "Set") : "No PIN" }),
+        el("button", { class: "link", style: "margin-left:6px", text: b.supPin ? "Reset" : "Create", onclick: function () {
+          confirmBox((b.supPin ? "Reset" : "Create") + " supervisor PIN for " + b.name + "?", "A new 6-digit PIN is shown once. Give it to the warehouse supervisor; they choose their own PIN at first login." + (b.supPin ? " The old PIN stops working and the supervisor is logged out." : ""), b.supPin ? "Reset" : "Create", async function () {
+            try { var r = await rpc("admin_sup_pin", { p_token: tok(), p_branch: b.name }); await loadAdmin(); hooks.render();
+              msg("Supervisor PIN for " + b.name, "PIN: " + r.pin + "\n\nLog in: open the app → “Warehouse supervisor? Log in here” → plant code + this PIN. It won't be shown again."); }
+            catch (e) { msg("Failed", errText(e)); }
+          });
+        } })),
+      el("td", {}, el("button", { class: "btn", text: "Save", onclick: function () {
+        call("admin_dcc_branch", { p_branch: b.name, p_days: Object.keys(days).map(Number).sort(), p_from: f.value, p_to: to.value }, b.name + " saved.").catch(function () { });
+      } }))));
+  });
+  c.append(el("h3", { style: "margin-top:16px", text: "Warehouses" }),
+    el("p", { class: "small muted", text: "Working days: no daily count on other days (Kelantan and Terengganu usually Sun-Thu). Submitting after the window end shows as late on the dashboard." }),
+    el("div", { class: "tw" }, t));
+  return c;
 }

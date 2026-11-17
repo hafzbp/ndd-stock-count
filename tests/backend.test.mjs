@@ -282,5 +282,110 @@ await t("10 wrong plant codes lock plant login for 15 minutes", async () => {
   assert.equal((await rpc("plant_login", { p_code: "1501" })).ok, true);
 });
 
+console.log("daily cycle count");
+let A2, SUP, PIN, TD;
+const day = async (d) => { await db.query(`insert into public.settings (key, value) values ('test_today', '"${d}"') on conflict (key) do update set value = excluded.value`); };
+await t("setup: admin login, monthly closed, photos optional, today = Wed 18 Nov 2026", async () => {
+  A2 = (await rpc("admin_login", { p_password: "NewAdm77" })).token; assert.ok(A2);
+  await db.query("update public.stock_takes set status = 'closed', closed_at = now() - interval '2 days' where kind = 'monthly'"); await db.query("delete from public.count_log");
+  await rpc("admin_settings", { p_token: A2, p_patch: { photo_min: 0 } }); await day("2026-11-18");
+});
+await t("no stock upload yet: nothing planned, counter told there's nothing to count", async () => {
+  const r = await rpc("plant_login", { p_code: "1501" }); TD = r.token; assert.equal(r.take.kind, "monthly");
+  await rejects(rpc("counter_start", { p_token: TD, p_device: "d-1", p_branch: "NDD Alpha", p_role: "ops", p_data: {} }), /Nothing to count at NDD Alpha today/);
+  const o = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(o.rows.find((x) => x.branch === "NDD Alpha").why, "nostock");
+});
+await t("daily stock upload; ABC by value per warehouse (A 80%, B next 15%, C rest)", async () => {
+  const r = await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-17", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) }); assert.equal(r.branches, 2);
+  await rejects(rpc("admin_load_daily", { p_token: A2, p_date: "2026-12-01", p_payload: mb52Payload(["NDD Alpha"]) }), /stock date/);
+  await rpc("admin_dcc_day", { p_token: A2 });
+  const a = await rpc("admin_abc", { p_token: A2, p_branch: "NDD Alpha" });
+  assert.deepEqual(a.rows.map((x) => x.code + ":" + x.cls), ["D4:A", "A1:A", "C3:B", "B2:C"]);
+  const b = await rpc("admin_abc", { p_token: A2, p_branch: "NDD Beta" }); assert.deepEqual(b.rows.map((x) => x.code + ":" + x.cls), ["A1:A", "C3:B"]);
+});
+await t("today's list: monthly need spread over the remaining working days, A first, by value", async () => {
+  const o = await rpc("admin_dcc_day", { p_token: A2 }), al = o.rows.find((x) => x.branch === "NDD Alpha"), be = o.rows.find((x) => x.branch === "NDD Beta");
+  assert.equal(al.take.kind, "daily"); assert.equal(al.take.mode, "single"); assert.deepEqual(al.take.plan, { D4: "A" });
+  assert.deepEqual(be.take.plan, { A1: "A" });
+  const again = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(again.rows.find((x) => x.branch === "NDD Alpha").take.id, al.take.id);
+});
+await t("counter gets today's daily list after the plant code", async () => {
+  const r = await rpc("plant_login", { p_code: "1501" }); TD = r.token; assert.equal(r.take.kind, "daily"); assert.equal(r.take.countDate, "2026-11-18");
+  const b = await rpc("counter_branch", { p_token: TD, p_branch: "NDD Alpha" }); assert.deepEqual(b.codes, ["D4"]); assert.deepEqual(b.batches, { D4: ["2027-01"] });
+});
+await t("supervisor: HQ creates PIN (shown once), wrong PIN fails, must change at first login", async () => {
+  await rejects(rpc("admin_sup_pin", { p_token: TD, p_branch: "NDD Alpha" }), /login/);
+  PIN = (await rpc("admin_sup_pin", { p_token: A2, p_branch: "NDD Alpha" })).pin; assert.match(PIN, /^\d{6}$/);
+  assert.equal((await rpc("sup_login", { p_code: "1501", p_pin: "000000" === PIN ? "111111" : "000000" })).ok, false);
+  const r = await rpc("sup_login", { p_code: "1501", p_pin: PIN }); assert.equal(r.mustChange, true); SUP = r.token;
+  await rejects(rpc("sup_change_pin", { p_token: SUP, p_branch: "NDD Alpha", p_pin: "12" }), /6 to 8 digits/);
+  await rejects(rpc("sup_change_pin", { p_token: SUP, p_branch: "NDD Beta", p_pin: "24681012" }), /supervisor login/);
+  await rpc("sup_change_pin", { p_token: SUP, p_branch: "NDD Alpha", p_pin: "24681012" });
+  assert.equal((await rpc("sup_login", { p_code: "1501", p_pin: "24681012" })).mustChange, false);
+  await rejects(rpc("sup_day", { p_token: TD, p_branch: "NDD Alpha" }), /supervisor login/);
+});
+await t("supervisor adds a SKU to today; counter counts and submits", async () => {
+  await rejects(rpc("sup_add_sku", { p_token: SUP, p_branch: "NDD Alpha", p_code: "ZZ9" }), /Unknown SKU/);
+  const tk = await rpc("sup_add_sku", { p_token: SUP, p_branch: "NDD Alpha", p_code: "C3" }); assert.equal(tk.skuCount, 2);
+  assert.deepEqual((await rpc("counter_branch", { p_token: TD, p_branch: "NDD Alpha" })).codes.sort(), ["C3", "D4"]);
+  const s = await rpc("counter_start", { p_token: TD, p_device: "d-1", p_branch: "NDD Alpha", p_role: "ops", p_data: { member: "Ali", names: ["Ali"] } });
+  const lines = { "D4|2027-01": L("D4", "2027-01", null, null, 990), "C3|2026-12": L("C3", "2026-12", null, null, 50) };
+  await rpc("counter_save", { p_token: TD, p_device: "d-1", p_id: s.id, p_data: { member: "Ali", names: ["Ali"], lines } });
+  await rpc("counter_submit", { p_token: TD, p_device: "d-1", p_id: s.id, p_data: { member: "Ali", names: ["Ali"], lines } });
+  await db.query("update public.count_sessions set submitted_at = '2026-11-18 08:30:00+08' where id = $1", [s.id]);
+  const d = await rpc("sup_day", { p_token: SUP, p_branch: "NDD Alpha" });
+  assert.deepEqual(d.takeInfo.plan, { D4: "A", C3: "S" }); assert.equal(d.sessions.length, 1); assert.equal(d.sys["NDD Alpha"].length, 2);
+});
+await t("dashboard: on time, accuracy, coverage; public version has no RM", async () => {
+  const st = await rpc("admin_dcc_stats", { p_token: A2, p_from: "2026-11-16", p_to: "2026-11-18" }), al = st.branches.find((x) => x.branch === "NDD Alpha");
+  assert.deepEqual(al.cells.map((c) => c.st), ["none", "none", "ontime"]);
+  assert.equal(al.ok, 1); assert.equal(al.counted, 2); assert.equal(al.covered, 2); assert.equal(al.universe, 4);
+  assert.equal(st.top[0].code, "C3"); assert.equal(st.top[0].varQ, -10);
+  const be = st.branches.find((x) => x.branch === "NDD Beta"); assert.equal(be.cells[2].st, "todo");
+  const pub = await rpc("public_dcc", {}); assert.equal(pub.top, null); assert.equal(pub.branches[0].net, null); assert.equal(pub.withRm, false);
+});
+await t("next day: yesterday closes and is logged; out-of-tolerance SKU comes back as a recount", async () => {
+  await day("2026-11-19");
+  const r = await rpc("plant_login", { p_code: "1501" }); assert.equal(r.take.countDate, "2026-11-19");
+  const lg = (await db.query("select code, flag from public.count_log where branch = 'NDD Alpha' and kind = 'daily' order by code")).rows;
+  assert.deepEqual(lg.map((x) => x.code + ":" + x.flag), ["C3:OVER", "D4:WITHIN"]);
+  const o = await rpc("admin_dcc_day", { p_token: A2 }); assert.deepEqual(o.rows.find((x) => x.branch === "NDD Alpha").take.plan, { A1: "A", C3: "R" });
+  const st = await rpc("admin_dcc_stats", { p_token: A2, p_from: "2026-11-18", p_to: "2026-11-19" });
+  assert.equal(st.branches.find((x) => x.branch === "NDD Beta").cells[0].st, "missed");
+});
+await t("yesterday's count can't be changed any more", async () => {
+  const old = (await db.query("select id from public.count_sessions where device_id = 'd-1'")).rows[0].id;
+  const r = await rpc("counter_save", { p_token: TD, p_device: "d-1", p_id: old, p_data: { lines: {} } }); assert.equal(r.ok, false);
+});
+await t("supervisor skips today with a reason; counters are told why", async () => {
+  await rejects(rpc("sup_skip", { p_token: SUP, p_branch: "NDD Alpha", p_reason: "" }), /reason/);
+  const k = await rpc("sup_skip", { p_token: SUP, p_branch: "NDD Alpha", p_reason: "Stock transfer audit" }); assert.equal(k.skipReason, "Stock transfer audit");
+  await rejects(rpc("counter_start", { p_token: TD, p_device: "d-1", p_branch: "NDD Alpha", p_role: "ops", p_data: {} }), /skipped: Stock transfer audit/);
+  const st = await rpc("admin_dcc_stats", { p_token: A2, p_from: "2026-11-19", p_to: "2026-11-19" }); assert.equal(st.branches.find((x) => x.branch === "NDD Alpha").cells[0].st, "skip");
+});
+await t("Sunday is off; working days are set per warehouse", async () => {
+  await day("2026-11-22");
+  const o = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(o.rows.find((x) => x.branch === "NDD Alpha").why, "off");
+  await rejects(rpc("admin_dcc_branch", { p_token: A2, p_branch: "NDD Alpha", p_days: [7, 1, 2, 3, 4], p_from: "10:00", p_to: "09:00" }), /start must be before end/);
+  await rpc("admin_dcc_branch", { p_token: A2, p_branch: "NDD Alpha", p_days: [7, 1, 2, 3, 4], p_from: "06:30", p_to: "09:30" });
+  const o2 = await rpc("admin_dcc_day", { p_token: A2 }), al = o2.rows.find((x) => x.branch === "NDD Alpha"); assert.equal(al.take.kind, "daily"); assert.equal(al.to, "09:30");
+});
+await t("monthly stock take open at a warehouse takes over from the daily count", async () => {
+  await day("2026-11-23");
+  await rpc("admin_draft", { p_token: A2, p_name: "Monthly Nov", p_scope: "total", p_skus: [] });
+  await rpc("admin_load_mb52", { p_token: A2, p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
+  await rpc("admin_set_status", { p_token: A2, p_status: "open" });
+  const r = await rpc("plant_login", { p_code: "1501" }); assert.equal(r.take.kind, "monthly"); assert.equal(r.take.name, "Monthly Nov");
+  assert.equal((await rpc("admin_dcc_day", { p_token: A2 })).rows.find((x) => x.branch === "NDD Alpha").why, "monthly");
+  assert.equal((await rpc("admin_load", { p_token: A2 })).takes.every((x) => x.kind === "monthly"), true);
+  await rpc("admin_set_status", { p_token: A2, p_status: "closed" });
+  assert.equal((await rpc("plant_login", { p_code: "1501" })).take.kind, "daily");
+});
+await t("bad settings rejected", async () => {
+  await rejects(rpc("admin_settings", { p_token: A2, p_patch: { dcc_abc: { a: 96, b: 95 } } }), /A must be below B/);
+  await rejects(rpc("admin_settings", { p_token: A2, p_patch: { dcc_target: { A: 0, B: 2, C: 1 } } }), /1-31/);
+  await db.query("delete from public.settings where key = 'test_today'");
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -6,6 +6,8 @@ import { renderCount, withPin, loadMaster, loadBranch, roleName } from "./count.
 import { renderMaster, loadAdmin } from "./master.js";
 import { renderSetup } from "./setup.js";
 import { renderHome } from "./home.js";
+import { renderDaily, renderDash } from "./daily.js";
+import { renderSup, supLogin, supLogout, loadSupTok } from "./sup.js";
 import { sessRole } from "./pure.js";
 
 function setHH() { var h = document.querySelector("header"); if (h) document.documentElement.style.setProperty("--hh", h.offsetHeight + "px"); }
@@ -14,13 +16,16 @@ window.addEventListener("resize", setHH);
 function render() {
   setHH();
   var m = cur();
-  $("#sub").textContent = m && m.member ? (m.branch + " · " + roleName(sessRole(m)) + " · " + m.member) : (isOwner() ? "Owner" : isAdmin() ? "Admin" : ((S.take && S.take.name) || "Stock take"));
+  $("#sub").textContent = m && m.member ? (m.branch + " · " + roleName(sessRole(m)) + " · " + m.member) : (isOwner() ? "Owner" : isAdmin() ? "Admin" : supMode() ? "Supervisor · " + S.sup.branch : ((S.take && S.take.name) || "Stock take"));
   if (S.cfg && S.cfg.title) { $("#title").textContent = S.cfg.title; document.title = S.cfg.title; }
   drawHeader();
   if (!S.cfg) return;
   var app = $("#app"); app.innerHTML = ""; $("#foot").classList.add("hidden");
   if (inAppGate(app)) return;
-  if (S.tab === "home" && isAdmin()) renderHome(app);
+  if (S.tab === "daily" && isAdmin()) renderDaily(app);
+  else if (S.tab === "dash" && isAdmin()) renderDash(app);
+  else if (S.tab === "sup" && supMode()) renderSup(app);
+  else if (S.tab === "home" && isAdmin()) renderHome(app);
   else if (S.tab === "master" && isAdmin()) renderMaster(app);
   else if (S.tab === "setup" && isAdmin()) renderSetup(app);
   else renderCount(app);
@@ -29,18 +34,29 @@ function render() {
 hooks.render = render;
 hooks.openLogin = function (first) { if (first) bootstrap(); else onLockBtn(); };
 hooks.needPin = function (br) { withPin(br, function () { flush(); render(); }); };
+hooks.openSup = supLogin;
+function supMode() { return !isAdmin() && !!S.sup; }
 
 function drawHeader() {
   var tabs = $("#tabs"); tabs.innerHTML = "";
   if (isAdmin()) {
     tabs.classList.remove("hidden");
-    [["home", "Stock take"], ["master", "Master"], ["setup", "Settings"], ["count", "Count"]].forEach(function (t) {
-      tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", text: t[1], onclick: function () { S.tab = t[0]; if (t[0] === "home") S.viewTake = null; if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }));
+    [["daily", "Daily"], ["home", "Monthly"], ["master", "Master"], ["dash", "Dashboard"], ["setup", "Settings"], ["count", "Count"]].forEach(function (t) {
+      tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", text: t[1], onclick: function () {
+        S.tab = t[0]; if (t[0] === "home" || t[0] === "daily") S.viewTake = null; if (t[0] === "daily") S.dcc = null; if (t[0] === "dash") S.dashData = null;
+        if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }));
     });
+  } else if (supMode()) {
+    tabs.classList.remove("hidden");
+    [["sup", "My warehouse"], ["count", "Count"]].forEach(function (t) {
+      tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", text: t[1], onclick: function () { S.tab = t[0]; if (t[0] === "sup") S.supDay = null; render(); window.scrollTo(0, 0); } }));
+    });
+    if (S.tab !== "sup" && S.tab !== "count") S.tab = "sup";
   } else { tabs.classList.add("hidden"); S.tab = "count"; }
-  var lk = $("#lockBtn"), cm = counterMode();
-  $("#dashBtn").style.display = cm ? "none" : "";
-  if (cm) { lk.replaceChildren("Log out"); lk.title = "Log out of " + cur().branch + " (your counts stay saved)"; }
+  var lk = $("#lockBtn"), cm = counterMode() && !supMode();
+  $("#dashBtn").style.display = cm || isAdmin() ? "none" : "";
+  if (supMode()) { lk.replaceChildren("Log out"); lk.title = "Log out of the supervisor view"; }
+  else if (cm) { lk.replaceChildren("Log out"); lk.title = "Log out of " + cur().branch + " (your counts stay saved)"; }
   else { lk.replaceChildren(isAdmin() ? "🔓" : "🔒", el("span", { class: "lbl", text: isAdmin() ? " Log out" : " Admin" })); lk.title = isAdmin() ? "Log out" : "Admin login"; }
 }
 /* a counter is inside a count on this phone: header shows only Log out */
@@ -65,6 +81,7 @@ function adminErr(e) {
 }
 
 function onLockBtn() {
+  if (supMode()) { supLogout(); return; }
   if (counterMode()) { counterLogout(); return; }
   if (isAdmin()) {
     var t = S.admin.token; S.admin = null; S.adm = null; S.viewTake = null; S.wiz = null; S.wizNew = false; saveTokens(); S.tab = "count"; render();
@@ -79,7 +96,8 @@ function onLockBtn() {
         var r = await rpc("admin_login", { p_password: i.value });
         if (!r.ok) { err.textContent = "Wrong password"; i.value = ""; return; }
         S.admin = { token: r.token, kind: r.kind }; saveTokens(); closeModal();
-        S.tab = "home"; S.viewTake = null; await loadAdmin(); await loadMaster().catch(function () { }); render();
+        S.dcc = null; S.viewTake = null; await loadAdmin(); await loadMaster().catch(function () { });
+        S.tab = S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open" ? "home" : "daily"; render();
       } catch (e) { err.textContent = errText(e); }
       finally { go.disabled = false; }
     } });
@@ -138,9 +156,12 @@ async function tick() {
   try {
     await refreshCfg();
     var changed = await sync();
+    /* the daily list can grow during the day (supervisor adds SKUs): keep the counter's list current */
+    var cm0 = cur(); if (cm0 && S.tab === "count" && S.tokens[cm0.branch]) { var before = JSON.stringify((S.br[cm0.branch] || {}).codes || []); try { await loadBranch(cm0.branch); if (JSON.stringify((S.br[cm0.branch] || {}).codes || []) !== before) changed = true; } catch (e) { } }
     if (S.saveErr && S.saveErr !== "PIN") { S.saveErr = null; flush(); }
     if (changed && S.tab === "count" && !document.querySelector("#modal.on") && !document.querySelector(".ssheet") && !document.querySelector(".scanov")) render();
     if (isAdmin() && (S.tab === "master" || (S.tab === "home" && S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open")) && !document.querySelector("#modal.on")) { await loadAdmin(); render(); }
+    if (isAdmin() && S.tab === "daily" && S.dcc && S.dcc.date === S.dcc.today && !document.querySelector("#modal.on") && !document.activeElement.matches("input,select")) { S.dcc = null; render(); }
     syncPill();
   } catch (e) {
     if (e.code === "OFFLINE") pill(anyDirty() ? "Offline - kept on phone" : "Offline", "warn");
@@ -152,7 +173,7 @@ async function init() {
   $("#lockBtn").addEventListener("click", onLockBtn);
   if (/[?&]api=/.test(location.search)) $("#dashBtn").href = "dashboard/" + location.search;
   $("#modal").addEventListener("click", function (e) { if (e.target.id === "modal") closeModal(); });
-  loadLocal();
+  loadLocal(); loadSupTok();
   try { var c = localStorage.getItem("ndd2-cfg"); if (c) S.cfg = JSON.parse(c); } catch (e) { }
   if (S.cfg) render();
   var ok = await refreshCfg();
@@ -161,7 +182,8 @@ async function init() {
   try { await sync(); } catch (e) { }
   if (isAdmin()) { try { await loadAdmin(); } catch (e) { if (e.code === "AUTH") { S.admin = null; saveTokens(); } } }
   if (S.skus == null && (isAdmin() || Object.keys(S.tokens).length)) { try { await loadMaster(); } catch (e) { } }
-  var m = cur(); if (m && !S.br[m.branch]) { try { await loadBranch(m.branch); } catch (e) { } }
+  var m = cur(); if (m) { try { await loadBranch(m.branch); } catch (e) { } }
+  if (supMode() && S.tab === "count" && !cur()) S.tab = "sup";
   render(); syncPill();
   if (anyDirty()) flush();
   setInterval(tick, 20000);

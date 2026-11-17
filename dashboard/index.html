@@ -37,6 +37,11 @@ main{max-width:1200px;margin:0 auto;padding:16px}
 .muted{color:var(--mute)}.small{font-size:12.5px}
 .note{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:var(--mute)}
 .center{text-align:center;padding:40px 10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}.stat b{display:block;font-size:24px;font-variant-numeric:tabular-nums}.stat span{font-size:12.5px;color:var(--mute)}
+.card{margin-bottom:12px}.card h3{font-size:15px;margin:0 0 8px}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}th{color:var(--mute);font-weight:600}.n{text-align:right;font-variant-numeric:tabular-nums}
+.sec{font-size:17px;margin:18px 0 10px}
 </style>
 </head>
 <body>
@@ -47,7 +52,7 @@ main{max-width:1200px;margin:0 auto;padding:16px}
   <span class="pill" id="live">…</span>
   <a href="../" style="margin-left:8px;color:inherit;font-size:13px;white-space:nowrap">← Counting app</a>
 </header>
-<main id="app"><div class="center muted">Loading…</div></main>
+<main id="app"><section id="dcc"><div class="center muted">Loading…</div></section><section id="monthly"></section></main>
 <script type="module" src="dash.js"></script>
 </body>
 </html>
