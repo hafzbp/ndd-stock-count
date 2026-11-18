@@ -62,19 +62,24 @@ function drawHeader() {
 /* a counter is inside a count on this phone: header shows only Log out */
 function counterMode() { var m = cur(); return !isAdmin() && !!m && !!S.tokens[m.branch]; }
 
-async function counterLogout() {
+async function counterLogout(done) {
   var m = cur(), br = m.branch;
-  confirmBox("Log out of " + br + "?", "Your counts stay saved. To continue later, open the app and log in again with the plant code - you carry on where you stopped.", "Log out", async function () {
+  async function go() {
     clearTimeout(S.timer); try { await flush(); } catch (e) { }
     S.saveErr = null;
+    /* stock take closed: counts are on the server, so the phone forgets them (unsent changes stay) */
+    if (S.take && S.take.status === "closed") Object.keys(S.mine.sessions).forEach(function (k) { var x = S.mine.sessions[k]; if (x.branch === br && !x.dirty) delete S.mine.sessions[k]; });
     var waiting = Object.keys(S.mine.sessions).filter(function (k) { var x = S.mine.sessions[k]; return x.branch === br && x.dirty; }).length;
     var t = S.tokens[br]; delete S.tokens[br]; saveTokens();
     S.mine.active = null; S.start = { step: "code" }; S.step = ""; backup(); render(); window.scrollTo(0, 0);
     if (t) rpc("logout", { p_token: t }).catch(function () { });
     if (waiting) msg("Logged out", "Some changes have not uploaded yet (no signal). They are kept on this phone and upload as soon as you log in again with the plant code. Don't clear the browser data on this phone.");
-    else toast("Logged out. Your counts are saved.");
-  });
+    else toast(done ? "Done. Thank you!" : "Logged out. Your counts are saved.");
+  }
+  if (done) go();
+  else confirmBox("Log out of " + br + "?", "Your counts stay saved. To continue later, open the app and log in again with the plant code - you carry on where you stopped.", "Log out", go);
 }
+hooks.counterLogout = counterLogout;
 function adminErr(e) {
   if (e && e.code === "AUTH") { S.admin = null; saveTokens(); S.tab = "count"; render(); msg("Signed out", "Your admin login expired or the password was changed. Log in again."); }
   else msg("Can't load", errText(e));

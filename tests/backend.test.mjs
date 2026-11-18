@@ -259,6 +259,17 @@ await t("single count: one team's count is agreed; both teams must still match",
   assert.equal(two.A1.status, "WAITING FINANCE"); assert.equal(two.B2.status, "WAITING OPS"); assert.equal(two.A1.skuFlag, "PENDING");
 });
 
+console.log("SQL safety");
+await t("no DELETE/UPDATE without WHERE (Supabase rejects them from the API - pg-safeupdate)", async () => {
+  const fs = await import("node:fs"), dir = new URL("../sql/", import.meta.url), bad = [];
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".sql"))) {
+    /* only function bodies: those run through the API; one-off migration statements don't */
+    const sql = [...fs.readFileSync(new URL(f, dir), "utf8").replace(/--[^\n]*/g, "").matchAll(/create or replace function[\s\S]*?\$\$([\s\S]*?)\$\$;/gi)].map((x) => x[1]).join("\n");
+    for (const m of sql.matchAll(/\b(delete\s+from|update\s+[\w.]+\s+set)\b[\s\S]*?;/gi)) if (!/\bwhere\b/i.test(m[0])) bad.push(f + ": " + m[0].replace(/\s+/g, " ").slice(0, 90));
+  }
+  assert.deepEqual(bad, []);
+});
+
 console.log("owner tools");
 await t("adding a known branch adds nothing", async () => {
   assert.equal(await rpc("admin_add_branches", { p_token: OWNER, p_branches: ["NDD Delta", "NDD Alpha"] }), 1);
@@ -380,6 +391,22 @@ await t("monthly stock take open at a warehouse takes over from the daily count"
   assert.equal((await rpc("admin_load", { p_token: A2 })).takes.every((x) => x.kind === "monthly"), true);
   await rpc("admin_set_status", { p_token: A2, p_status: "closed" });
   assert.equal((await rpc("plant_login", { p_code: "1501" })).take.kind, "daily");
+});
+await t("owner deletes a closed stock take (counts, results, photos); admin can't; open one can't be deleted", async () => {
+  const OW = (await rpc("admin_login", { p_password: "OwnerPass1" })).token;
+  const cur = (await rpc("admin_load", { p_token: A2 })).current, takes = (await rpc("admin_load", { p_token: A2 })).takes;
+  const old = takes.find((x) => x.id !== cur && x.status !== "open");
+  await rejects(rpc("owner_delete_take", { p_token: A2, p_take: old.id }), /owner/i);
+  const r = await rpc("owner_delete_take", { p_token: OW, p_take: old.id }); assert.equal(r.name, old.name);
+  assert.equal((await db.query("select count(*)::int n from public.count_sessions where take_id = $1", [old.id])).rows[0].n, 0);
+  assert.equal((await rpc("admin_load", { p_token: A2 })).takes.some((x) => x.id === old.id), false);
+  /* the current one (closed) can go too: current moves to the newest remaining monthly stock take */
+  const r2 = await rpc("owner_delete_take", { p_token: OW, p_take: cur }); assert.ok(r2.name);
+  const after = await rpc("admin_load", { p_token: A2 }); assert.notEqual(after.current, cur); assert.ok(after.takeInfo && after.takeInfo.id === after.current);
+  await rpc("admin_draft", { p_token: A2, p_name: "Open one", p_scope: "total", p_skus: [] });
+  await rpc("admin_load_mb52", { p_token: A2, p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) }); await rpc("admin_set_status", { p_token: A2, p_status: "open" });
+  await rejects(rpc("owner_delete_take", { p_token: OW, p_take: (await rpc("admin_load", { p_token: A2 })).current }), /Close counting first/);
+  await rpc("admin_set_status", { p_token: A2, p_status: "closed" });
 });
 await t("bad settings rejected", async () => {
   await rejects(rpc("admin_settings", { p_token: A2, p_patch: { dcc_abc: { a: 96, b: 95 } } }), /A must be below B/);

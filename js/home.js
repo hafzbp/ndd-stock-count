@@ -4,7 +4,7 @@
    Closed → results, export, reopen, start a new one
    Below: history of earlier stock takes. */
 import { S, hooks, isOwner } from "./state.js";
-import { rpc } from "./api.js";
+import { rpc, fn } from "./api.js";
 import { el, fmt, tsTxt, msg, confirmBox, openModal, closeModal, errText, toast } from "./ui.js";
 import { hasQty, sessRole } from "./pure.js";
 import { loadAdmin, variance, branchesAdm } from "./master.js";
@@ -217,7 +217,8 @@ function renderClosed(app, t) {
         el("button", { class: "btn", text: "Reopen counting", onclick: function () {
           confirmBox("Reopen counting?", "Counters can change their counts again until you close it.", "Reopen", async function () { try { await rpc("admin_set_status", { p_token: tok(), p_status: "open" }); await loadAdmin(); hooks.render(); } catch (e) { msg("Can't reopen", errText(e)); } });
         } }),
-        el("button", { class: "btn", text: "Start new stock take", onclick: function () { S.wizNew = true; S.wiz = null; hooks.render(); window.scrollTo(0, 0); } }))));
+        el("button", { class: "btn", text: "Start new stock take", onclick: function () { S.wizNew = true; S.wiz = null; hooks.render(); window.scrollTo(0, 0); } }),
+        isOwner() ? el("button", { class: "btn", style: "color:var(--bad)", text: "Delete", onclick: function () { deleteTake(t); } }) : null)));
 }
 
 /* ---------------- History ---------------- */
@@ -228,7 +229,27 @@ function renderHistory(app) {
   past.forEach(function (x) {
     t.append(el("tr", {}, el("td", { text: x.name }), el("td", { text: (x.scope === "partial" ? "Partial (" + x.skuCount + ")" : "Total") + (x.mode === "single" ? " · Single" : " · Double") }), el("td", {}, stateTag(x.status)),
       el("td", { text: tsTxt(x.openedAt) }), el("td", { text: tsTxt(x.closedAt) }),
-      el("td", {}, el("button", { class: "link", text: "View (read-only)", onclick: async function () { try { S.viewTake = x.id; await loadAdmin(); S.tab = "master"; hooks.render(); window.scrollTo(0, 0); } catch (e) { S.viewTake = null; msg("Can't load", errText(e)); } } }))));
+      el("td", { class: "row", style: "gap:10px;flex-wrap:nowrap" }, el("button", { class: "link", text: "View (read-only)", onclick: async function () { try { S.viewTake = x.id; await loadAdmin(); S.tab = "master"; hooks.render(); window.scrollTo(0, 0); } catch (e) { S.viewTake = null; msg("Can't load", errText(e)); } } }),
+        isOwner() && x.status !== "open" ? el("button", { class: "link", style: "color:var(--bad)", text: "Delete", onclick: function () { deleteTake(x); } }) : null)));
   });
   app.append(el("div", { class: "card", style: "margin-top:18px" }, el("h3", { text: "History" }), el("div", { class: "tw" }, t)));
+}
+
+/* Owner: delete a closed (or never opened) stock take with its counts, results and photos. */
+function deleteTake(x) {
+  openModal(function (sh) {
+    var inp = el("input", { placeholder: "Type the stock take name to confirm" }), err = el("div", { class: "small", style: "color:var(--bad);min-height:18px" });
+    sh.append(el("h3", { text: "Delete “" + x.name + "”?" }),
+      el("p", { class: "small", text: "All counts, results, recount lists and warehouse photos of this stock take are deleted for good. It can't be undone. Download the Excel or sign-off PDFs first if you need them." }),
+      inp, err,
+      el("div", { class: "row", style: "justify-content:flex-end" }, el("button", { class: "btn", text: "Cancel", onclick: closeModal }),
+        el("button", { class: "btn", style: "color:var(--bad)", text: "Delete for good", onclick: async function () {
+          if (inp.value.trim() !== x.name) { err.textContent = "Type the name exactly: " + x.name; return; }
+          try {
+            var r = await rpc("owner_delete_take", { p_token: S.admin.token, p_take: x.id });
+            if (r.paths && r.paths.length) { try { await fn("photos", { action: "remove_paths", token: S.admin.token, paths: r.paths }); } catch (e) { } }
+            closeModal(); S.viewTake = null; S.wiz = null; S.wizNew = false; await loadAdmin(); hooks.render(); toast("“" + r.name + "” deleted");
+          } catch (e) { err.textContent = errText(e); }
+        } })));
+  });
 }

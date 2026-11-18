@@ -93,6 +93,8 @@ export function serve() {
       const body = raw ? JSON.parse(raw) : {};
       res.setHeader("Content-Type", "application/json");
       if (u.pathname === "/functions/v1/photos") { const [st, out] = await photos(body); res.writeHead(st); res.end(JSON.stringify(out)); return; }
+      /* FAIL_RPC=fn1,fn2 makes those functions fail like a server-side SQL error (to test how the app copes) */
+      if (((process.env.FAIL_RPC || "") + "," + (fs.existsSync("/tmp/fail_rpc") ? fs.readFileSync("/tmp/fail_rpc", "utf8").trim() : "")).split(",").includes(u.pathname.slice(13))) { res.writeHead(400); res.end(JSON.stringify({ message: "DELETE requires a WHERE clause", code: "21000" })); return; }
       try { const r = await rpc(u.pathname.slice(13), body); res.writeHead(200); res.end(JSON.stringify(r)); }
       catch (e) { res.writeHead(e.status || (/AUTH|LOCKED/.test(e.message) ? 403 : 400)); res.end(JSON.stringify({ message: e.message, code: e.code })); }
       return;

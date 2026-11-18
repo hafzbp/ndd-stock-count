@@ -154,7 +154,7 @@ begin
   r := greatest(private.workdays(b, d, (mon + interval '1 month - 1 day')::date), 1);
 
   create temp table if not exists _due (code text, cls text, need int, gap int, since int, val numeric) on commit drop;
-  delete from pg_temp._due;
+  delete from pg_temp._due where true;
   insert into pg_temp._due
   select sc.code, sc.cls,
          greatest(0, coalesce((tgt ->> sc.cls)::int, 1) - (select count(*) from public.count_log l where l.branch = p_branch and l.code = sc.code and l.count_date >= mon and l.count_date < d))::int,
@@ -526,7 +526,7 @@ declare res jsonb; td date := private.today(); mon date := date_trunc('month', p
 begin
   perform private.roll_daily();
   create temp table if not exists _lg (branch text, code text, count_date date, var_q numeric, var_rm numeric, flag text) on commit drop;
-  delete from pg_temp._lg;
+  delete from pg_temp._lg where true;
   insert into pg_temp._lg select branch, code, count_date, var_q, var_rm, flag from public.count_log where kind = 'daily' and count_date between p_from and p_to;
   -- today's open counts that are already submitted count too
   insert into pg_temp._lg

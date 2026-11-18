@@ -64,8 +64,11 @@ export function applySync(res) {
     S.take = t;
     if (!S.mine.takeId) { S.mine.takeId = t.id; S.mine.resetId = t.resetId; }
     else if (S.mine.takeId !== t.id || S.mine.resetId !== t.resetId) {
-      if (S.mine.takeId && Object.keys(S.mine.sessions).length) changed = true;
-      S.mine = { takeId: t.id, resetId: t.resetId, sessions: {}, active: null };
+      /* another stock take (next day, after logout, new monthly): forget counts that are already on the server,
+         but keep changes not uploaded yet - they go up when this warehouse logs in again */
+      var keep = {}; Object.keys(S.mine.sessions).forEach(function (k) { if (S.mine.sessions[k].dirty) keep[k] = S.mine.sessions[k]; });
+      if (Object.keys(S.mine.sessions).length) changed = true;
+      S.mine = { takeId: t.id, resetId: t.resetId, sessions: keep, active: keep[S.mine.active] ? S.mine.active : null };
     }
   }
   var seen = {};

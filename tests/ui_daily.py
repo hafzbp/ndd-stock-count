@@ -20,7 +20,7 @@ with sync_playwright() as p:
     errs = []
     def page(w, h):
         ctx = br.new_context(viewport={"width": w, "height": h}, is_mobile=w < 600, has_touch=w < 600)
-        pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append(str(e))); pg.on("console", lambda m: m.type == "error" and errs.append("console: " + m.text))
+        pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append(str(e))); pg.on("console", lambda m: m.type == "error" and "ERR_INTERNET_DISCONNECTED" not in m.text and errs.append("console: " + m.text))
         return pg
 
     print("HQ: daily stock upload")
@@ -91,6 +91,24 @@ with sync_playwright() as p:
     pd.screenshot(path=f"{OUT}/public_dcc.png", full_page=True); ow.screenshot(path=f"{OUT}/admin_dash.png", full_page=True)
     ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily counts ·"); ow.wait_for_timeout(400); ow.screenshot(path=f"{OUT}/admin_daily.png", full_page=True)
     ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Daily cycle count"); ow.locator(".card:has(h3:text-is('Daily cycle count'))").screenshot(path=f"{OUT}/admin_dccset.png")
+
+    print("offline change + log out + phone syncs to another stock take: the unsent count survives")
+    op.wait_for_selector("text=Today's cycle count"); op.context.set_offline(True)
+    op.click(".seg button:text-is('All')"); op.wait_for_timeout(200)
+    if not op.is_visible(".sku:has-text('A1') .batch"): op.click(".skuh:has-text('A1')"); op.wait_for_timeout(200)
+    op.locator(".sku:has-text('A1') .batch").first.locator(".val").last.click(); [op.click(f"#sheet .pad button:text-is('{k}')") for k in ["C", "3", "5", "6"]]; op.click(SB("OK")); op.wait_for_timeout(1500)
+    op.click("#lockBtn"); op.click("#sheet button:text-is('Log out')"); op.wait_for_selector("#sheet >> text=Some changes have not uploaded yet"); op.click(SB("OK"))
+    op.context.set_offline(False)
+    # the same phone is then used for another warehouse: its sync follows NDD Beta's daily list
+    op.wait_for_selector("text=Enter your warehouse plant code"); [op.click(f".card .pad button:text-is('{d}')") for d in "1502"]; op.click(".card button:text-is('Next')")
+    op.wait_for_selector(B("Yes, that's my warehouse")); op.reload(); op.wait_for_timeout(3000)
+    if op.is_visible(B("Different warehouse")): op.click(B("Different warehouse")); op.wait_for_timeout(500)
+    check("after sync to another stock take: unsent count still on the phone", op.is_visible("text=Continue a count") and "kept on phone" in op.inner_text("#pill").lower(), op.inner_text("main")[:300] + " | " + op.inner_text("#pill"))
+    op.click(".big:has-text('NDD Alpha')"); op.wait_for_selector("#sheet .pad"); [op.click(f"#sheet .pad button:text-is('{d}')") for d in "1501"]; op.click("#sheet button:text-is('Next')")
+    op.wait_for_selector("text=Today's cycle count"); op.wait_for_timeout(3500)
+    check("logged in again: the change uploads", "All saved" in op.inner_text("#pill"), op.inner_text("#pill"))
+    ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily counts ·"); ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('View')"); ow.wait_for_selector("text=Daily count (read-only)")
+    check("HQ sees 356 (the offline change), not 355", "356" in ow.inner_text("main") and "355" not in ow.inner_text("main"), ow.inner_text("main")[:500])
 
     print("\npage errors:", errs or "none")
     br.close()

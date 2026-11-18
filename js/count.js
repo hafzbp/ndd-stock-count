@@ -83,7 +83,13 @@ export function renderCount(app) {
   }
   bd = bd || { codes: [], batches: {} };
   var locked = m.status === "submitted" || (closed() && !isAdmin());
-  if (closed() && !isAdmin()) app.append(el("div", { class: "banner warn", text: tstatus() === "draft" ? "Counting hasn't started yet. Your admin will open it." : "Counting is closed." }));
+  if (closed() && !isAdmin() && tstatus() === "draft") app.append(el("div", { class: "banner warn", text: "Counting hasn't started yet. Your admin will open it." }));
+  else if (closed() && !isAdmin()) {
+    /* counting closed: say so plainly and give one clear way out (the count is already on the server) */
+    app.append(el("div", { class: "card center" }, el("h2", { style: "margin:0 0 6px", text: "Counting is closed" }),
+      el("p", { class: "muted", text: "Your counts for " + m.branch + " are saved. Nothing else to do here." }),
+      el("button", { class: "btn primary", text: "Done - back to start", onclick: function () { if (hooks.counterLogout) hooks.counterLogout(true); } })));
+  }
   else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + ". Ask your admin to reopen if anything needs changing." }));
   if (S.take && S.take.kind === "daily") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Today's cycle count · " + (bd.codes || []).length + " SKU(s) on the list"));
   else if (S.take && S.take.scope === "partial") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Partial count · " + (bd.codes || []).length + " SKU(s) to count at this warehouse"));
@@ -349,11 +355,13 @@ function renderStart(app) {
   function reset() { S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); }
 
   if (st.step === "code") {
+    if (S.take && S.take.status === "closed") keys = keys.filter(function (k) { return ss[k].dirty; });
     if (keys.length) {
       app.append(el("h2", { text: "Continue a count" }));
       var cg = el("div", { class: "grid", style: "margin-bottom:18px" });
       keys.forEach(function (k) {
         var x = ss[k], n = Object.keys(x.lines || {}).filter(function (j) { return hasQty(x.lines[j]); }).length;
+        if (!x.dirty && S.take && S.take.status === "closed") return;   /* nothing left to do in a closed stock take */
         cg.append(el("button", { class: "big" + (S.mine.active === k ? " on" : ""), onclick: function () { withPin(x.branch, function () { S.mine.active = k; S.step = ""; S.start = null; backup(); hooks.render(); window.scrollTo(0, 0); schedule(200); }); } },
           el("div", { text: x.branch }), el("div", { class: "small", style: "font-weight:700;color:" + (sessRole(x) === "fin" ? "var(--accent)" : "var(--ok)"), text: roleName(sessRole(x)).toUpperCase() }),
           el("div", { class: "small muted", style: "font-weight:400", text: x.member }),
