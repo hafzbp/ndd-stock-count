@@ -86,8 +86,20 @@ with sync_playwright() as p:
     check("counter now sees the added SKU (2 on the list)", "2 SKUs" in op.inner_text(".kind-daily"), op.inner_text("main")[:300])
 
     print("dashboards")
+    ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Region and national operation manager"); ow.wait_for_selector(".card:has(h3:text-is('Region and national operation manager')) table")
+    mc = ".card:has(h3:text-is('Region and national operation manager'))"
+    for nm, rg, nom in [("NDD Alpha", "Central", "Ahmad"), ("NDD Beta", "North", "Budi")]:
+        ow.fill(f"{mc} tr:has(td:text-is('{nm}')) input >> nth=0", rg); ow.fill(f"{mc} tr:has(td:text-is('{nm}')) input >> nth=1", nom)
+        ow.click(f"{mc} tr:has(td:text-is('{nm}')) button:text-is('Save')"); ow.wait_for_timeout(600)
+    check("region + NOM saved", ow.input_value(f"{mc} tr:has(td:text-is('NDD Beta')) input >> nth=0") == "North")
     ow.click("#tabs button:text-is('Dashboard')"); ow.wait_for_selector("text=Compliance · warehouse × day")
-    dt = ow.inner_text("main"); check("admin dashboard: KPIs, grid, trends, table", all(x in dt for x in ["Counted today", "SKU coverage", "Accuracy (IRA)", "Net variance", "By warehouse", "Top variance SKUs"]), dt[:500])
+    dt = ow.inner_text("main"); check("admin dashboard: all sections", all(x in dt for x in ["Due today", "Not started", "Accuracy (IRA)", "Net variance", "Needs attention", "Today per warehouse", "Accuracy by warehouse", "Result by SKU", "Counters", "ABC coverage", "Repeat variance SKUs", "Compliance", "By warehouse", "Top variance SKUs", "Bad stock (later phase)"]), dt[:800])
+    tw = ow.inner_text(".card:has(h3:text-is('Today per warehouse'))"); check("today table: Alpha counting 1 / 2, Beta not started", "Counting" in tw and "1 / 2" in tw and "Not started" in tw, tw)
+    check("needs attention lists the not-started warehouses", "NDD Beta" in ow.inner_text(".card:has(h3:text-is('Needs attention'))"), ow.inner_text(".card:has(h3:text-is('Needs attention'))"))
+    ow.select_option("main select >> nth=1", "Central"); ow.wait_for_timeout(300)
+    tw = ow.inner_text(".card:has(h3:text-is('Today per warehouse'))"); check("region filter: only Central warehouses", "NDD Alpha" in tw and "NDD Beta" not in tw, tw)
+    check("region filter also applies to the shared views", "NDD Beta" not in ow.inner_text(".card:has(h3:text-is('By warehouse'))"))
+    ow.select_option("main select >> nth=1", ""); ow.wait_for_timeout(300)
     check("grid has a row per warehouse", ow.locator(".dccgrid tr").count() == 4)
     pd = page(1280, 900); pd.goto(BASE + "/dashboard/?api=local"); pd.wait_for_selector("text=Daily cycle count · this month")
     pt = pd.inner_text("main"); check("public dashboard: daily section, no RM", "SKU coverage" in pt and "Net variance" not in pt and "Top variance" not in pt, pt[:400])

@@ -84,24 +84,4 @@ export async function showAbc(branch, token) {
 }
 
 /* Dashboard tab */
-export function renderDash(app) {
-  var today = (S.dcc && S.dcc.today) || iso(new Date());
-  if (!S.dashP) S.dashP = { per: "mtd", br: "" };
-  var P = S.dashP, from = P.per === "7d" ? addDays(today, -6) : P.per === "lm" ? addDays(today.slice(0, 8) + "01", -1).slice(0, 8) + "01" : today.slice(0, 8) + "01";
-  var to = P.per === "lm" ? addDays(today.slice(0, 8) + "01", -1) : today, key = from + to;
-  var bar = el("div", { class: "row", style: "margin-bottom:10px" },
-    el("select", { style: "max-width:180px", onchange: function (e) { P.per = e.target.value; S.dashData = null; hooks.render(); } },
-      [["mtd", "This month"], ["7d", "Last 7 days"], ["lm", "Last month"]].map(function (o) { return el("option", { value: o[0], text: o[1], selected: P.per === o[0] }); })),
-    el("select", { style: "max-width:200px", onchange: function (e) { P.br = e.target.value; hooks.render(); } },
-      [el("option", { value: "", text: "All warehouses" })].concat(((S.dashData && S.dashData.branches) || []).map(function (b) { return el("option", { value: b.branch, text: b.branch, selected: P.br === b.branch }); }))),
-    el("button", { class: "btn", text: "↻", title: "Refresh", onclick: function () { S.dashData = null; hooks.render(); } }),
-    el("a", { class: "link small", href: "dashboard/", target: "_blank", rel: "noopener", text: "Public view (no RM) ↗" }));
-  app.append(bar);
-  if (!S.dashData || S.dashKey !== key) {
-    app.append(el("p", { class: "center muted", text: "Loading…" }));
-    rpc("admin_dcc_stats", { p_token: tok(), p_from: from, p_to: to }).then(function (r) { S.dashData = r; S.dashKey = key; hooks.render(); }, function (e) { msg("Can't load", errText(e)); });
-    return;
-  }
-  var root = el("div"); app.append(root);
-  renderDccStats(root, S.dashData, { branch: P.br || null });
-}
+export { renderDash } from "./hqdash.js";

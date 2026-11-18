@@ -1,7 +1,7 @@
 /* Setup (Finance / owner): MB52, pcs factors, barcodes, rules, dashboard, PINs, team, passwords, stock takes, backup. */
 import { S, hooks, isOwner } from "./state.js";
 import { rpc } from "./api.js";
-import { el, fmt, tsTxt, msg, confirmBox, openModal, closeModal, saveBlob, loadJs, errText, pill } from "./ui.js";
+import { el, fmt, tsTxt, msg, confirmBox, openModal, closeModal, saveBlob, loadJs, errText, pill, toast } from "./ui.js";
 import { parseMB52, numv, parseBarcodeRows, mb52Names } from "./pure.js";
 import { loadAdmin, branchesAdm, tolPct, currentTake } from "./master.js";
 
@@ -97,7 +97,7 @@ export function renderSetup(app) {
   if (!S.adm) { app.append(el("p", { class: "center muted", text: "Loading…" })); loadAdmin().then(hooks.render); return; }
   var A = S.adm, st = A.settings || {}, tk = currentTake();
   app.append(el("div", { class: "banner warn", text: "Admin only. Settings that stay the same between stock takes. Counters never see system quantities." }));
-  app.append(dccCard(A, st));
+  app.append(dccCard(A, st), metaCard());
 
   /* 2. factors */
   var fa = el("textarea", { placeholder: "Item Code\tPcs per CTN\tPcs per BOX\n650505\t240\t24" });
@@ -273,6 +273,32 @@ function renderTeam(app) {
 
 /* Daily cycle count: rules, working days and count window per warehouse, supervisor PINs. */
 var WD = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"]];
+/* Region and national operation manager per warehouse: dashboard filters. */
+function metaCard() {
+  var c = el("div", { class: "card" }, el("h3", { text: "Region and national operation manager" }),
+    el("p", { class: "small muted", text: "Used to filter the dashboard. Type the same spelling for warehouses that belong together; earlier values are suggested." }));
+  if (!S.meta) {
+    c.append(el("p", { class: "muted small", text: "Loading…" }));
+    rpc("admin_branch_meta", { p_token: tok() }).then(function (r) { S.meta = r; hooks.render(); }, function (e) { c.append(el("p", { class: "small", style: "color:var(--bad)", text: errText(e) })); });
+    return c;
+  }
+  var uniq = function (k) { var o = {}; S.meta.forEach(function (x) { if (x[k]) o[x[k]] = 1; }); return Object.keys(o).sort(); };
+  var dlR = el("datalist", { id: "dl-region" }, uniq("region").map(function (v) { return el("option", { value: v }); }));
+  var dlN = el("datalist", { id: "dl-nom" }, uniq("nom").map(function (v) { return el("option", { value: v }); }));
+  var t = el("table", {}, el("tr", {}, ["Warehouse", "Region", "National operation manager", ""].map(function (h) { return el("th", { text: h }); })));
+  S.meta.forEach(function (m) {
+    var r = el("input", { value: m.region || "", placeholder: "e.g. Central", list: "dl-region", style: "min-width:130px" });
+    var n = el("input", { value: m.nom || "", placeholder: "Name", list: "dl-nom", style: "min-width:150px" });
+    t.append(el("tr", {}, el("td", { text: m.branch }), el("td", {}, r), el("td", {}, n),
+      el("td", {}, el("button", { class: "btn", text: "Save", onclick: async function () {
+        try { S.meta = await rpc("admin_branch_meta", { p_token: tok(), p_branch: m.branch, p_region: r.value, p_nom: n.value }); S.dashToday = null; toast(m.branch + " saved"); hooks.render(); }
+        catch (e) { msg("Save failed", errText(e)); }
+      } }))));
+  });
+  c.append(dlR, dlN, el("div", { class: "tw" }, t));
+  return c;
+}
+
 function dccCard(A, st) {
   var abc = st.dcc_abc || { a: 80, b: 95 }, tg = st.dcc_target || { A: 4, B: 2, C: 1 };
   var on = el("input", { type: "checkbox", checked: st.dcc_enabled !== false });

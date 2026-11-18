@@ -49,7 +49,7 @@ function kpi(v, l, s) { return el("div", { class: "stat" }, el("b", { text: v })
 export function ensureDccCss() { if (!document.getElementById("dcc-css")) document.head.append(el("style", { id: "dcc-css", text: DCC_CSS })); }
 export function renderDccStats(root, st, opts) {
   opts = opts || {}; ensureDccCss();
-  var target = opts.target || 98, B = (st.branches || []).filter(function (b) { return !opts.branch || b.branch === opts.branch; });
+  var target = opts.target || 98, inSet = function (n) { return (!opts.branch || n === opts.branch) && (!opts.only || opts.only.indexOf(n) >= 0); }, B = (st.branches || []).filter(function (b) { return inSet(b.branch); });
   var today = st.today, todayIdx = -1;
   if (B.length && B[0].cells) B[0].cells.forEach(function (c, i) { if (c.d === today) todayIdx = i; });
   var tdTot = 0, tdDone = 0, late = 0, missed = 0, uni = 0, cov = 0, ok = 0, n = 0, net = 0, abs = 0, pace = [];
@@ -61,7 +61,7 @@ export function renderDccStats(root, st, opts) {
     uni += b.universe; cov += Math.min(b.covered, b.universe); ok += b.ok; n += b.counted; net += b.net || 0; abs += b.abs || 0; if (b.pace != null) pace.push(b.pace);
   });
   var paceAvg = pace.length ? pace.reduce(function (a, x) { return a + x; }, 0) / pace.length : null, covP = pct(cov, uni), accP = pct(ok, n);
-  root.append(el("div", { class: "stats dccst" },
+  if (!opts.noKpi) root.append(el("div", { class: "stats dccst" },
     kpi(todayIdx >= 0 ? tdDone + " / " + tdTot : "-", "Counted today", todayIdx >= 0 ? (tdTot - tdDone) + " still to submit" : "today is outside this period"),
     kpi(pctTxt(covP), "SKU coverage", paceAvg == null ? "" : "pace " + paceAvg.toFixed(0) + "% · " + (covP != null && covP >= paceAvg ? "on track" : "behind")),
     kpi(pctTxt(accP), "Accuracy (IRA)", "target " + target + "% · " + n + " SKU counts"),
@@ -89,9 +89,9 @@ export function renderDccStats(root, st, opts) {
   var mon = String(st.to).slice(0, 7), mdays = new Date(Number(mon.slice(0, 4)), Number(mon.slice(5, 7)), 0).getDate();
   var covS = tr.map(function (x) { return st.universe ? Math.round(x.covered / st.universe * 1000) / 10 : null; }), ideal = tr.map(function (x) { return String(x.d).slice(0, 7) === mon ? Math.round(dd(x.d) / mdays * 1000) / 10 : null; });
   root.append(el("div", { class: "grid2" },
-    el("div", { class: "card" }, el("h3", { text: "Accuracy trend" }), el("div", { class: "legend small muted" }, el("span", {}, el("i", { style: "background:#2a78d6" }), "Accuracy, all warehouses"), el("span", {}, "- - target " + target + "%")),
+    el("div", { class: "card" }, el("h3", { text: "Accuracy trend" + (opts.only || opts.branch ? " (all warehouses)" : "") }), el("div", { class: "legend small muted" }, el("span", {}, el("i", { style: "background:#2a78d6" }), "Accuracy, all warehouses"), el("span", {}, "- - target " + target + "%")),
       lineChart([{ v: acc, color: "#2a78d6" }, { v: acc.map(function () { return target; }), color: "#898781", dash: "5 4", w: 1.5 }], labels, lo, 100, "%")),
-    el("div", { class: "card" }, el("h3", { text: "Coverage this month" }), el("div", { class: "legend small muted" }, el("span", {}, el("i", { style: "background:#2a78d6" }), "SKUs counted at least once"), el("span", {}, "- - pace to 100%")),
+    el("div", { class: "card" }, el("h3", { text: "Coverage this month" + (opts.only || opts.branch ? " (all warehouses)" : "") }), el("div", { class: "legend small muted" }, el("span", {}, el("i", { style: "background:#2a78d6" }), "SKUs counted at least once"), el("span", {}, "- - pace to 100%")),
       lineChart([{ v: covS, color: "#2a78d6" }, { v: ideal, color: "#898781", dash: "5 4", w: 1.5 }], labels, 0, 100, "%"))));
 
   /* per warehouse */
@@ -110,7 +110,7 @@ export function renderDccStats(root, st, opts) {
 
   if (st.withRm && st.top) {
     var tt = el("table", {}, el("tr", {}, ["Warehouse", "SKU", "Var PCS", "Var RM", "Out of tolerance"].map(function (h, i) { return el("th", { class: i >= 2 ? "n" : "", text: h }); })));
-    st.top.filter(function (x) { return !opts.branch || x.branch === opts.branch; }).forEach(function (x) {
+    st.top.filter(function (x) { return inSet(x.branch); }).forEach(function (x) {
       tt.append(el("tr", {}, el("td", { text: x.branch }), el("td", { text: x.code + " " + (x.desc || "") }), el("td", { class: "n" + (x.varQ < 0 ? " neg" : ""), text: fmt(x.varQ) }),
         el("td", { class: "n" + ((x.varRm || 0) < 0 ? " neg" : ""), text: x.varRm == null ? "-" : fmt(x.varRm, 2) }), el("td", { class: "n" + (x.times > 1 ? " neg" : ""), text: x.times ? x.times + "×" : "" })));
     });

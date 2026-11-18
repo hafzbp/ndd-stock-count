@@ -355,6 +355,25 @@ await t("dashboard: on time, accuracy, coverage; public version has no RM", asyn
   const be = st.branches.find((x) => x.branch === "NDD Beta"); assert.equal(be.cells[2].st, "todo");
   const pub = await rpc("public_dcc", {}); assert.equal(pub.top, null); assert.equal(pub.branches[0].net, null); assert.equal(pub.withRm, false);
 });
+await t("dashboard 2: region + NOM per warehouse; today per warehouse (status, time taken, who, result)", async () => {
+  await rejects(rpc("admin_branch_meta", { p_token: TD, p_branch: "NDD Alpha", p_region: "Central", p_nom: "Ahmad" }), /login|admin/i);
+  await rejects(rpc("admin_branch_meta", { p_token: A2, p_branch: "NDD Nowhere", p_region: "X" }), /Unknown warehouse/);
+  const meta = await rpc("admin_branch_meta", { p_token: A2, p_branch: "NDD Alpha", p_region: " Central ", p_nom: "Ahmad" });
+  assert.deepEqual(meta.find((x) => x.branch === "NDD Alpha"), { branch: "NDD Alpha", region: "Central", nom: "Ahmad" });
+  await db.query("update public.count_sessions set started_at = '2026-11-18 08:00:00+08' where device_id = 'd-1'");
+  const o = await rpc("admin_dcc_today", { p_token: A2 }), al = o.rows.find((x) => x.branch === "NDD Alpha");
+  assert.equal(o.date, "2026-11-18"); assert.equal(al.status, "ontime"); assert.equal(al.region, "Central"); assert.equal(al.nom, "Ahmad");
+  assert.equal(al.listed, 2); assert.equal(al.counted, 2); assert.equal(al.minutes, 30); assert.equal(al.who, "Ali"); assert.equal(al.snapDate, "2026-11-17");
+  assert.deepEqual(al.result, { ok: 0, within: 1, over: 1, nis: 0, notCounted: 0 });
+  assert.equal(o.rows.find((x) => x.branch === "NDD Beta").status, "todo");
+  const ins = await rpc("admin_dcc_insights", { p_token: A2, p_from: "2026-11-01", p_to: "2026-11-18" });
+  assert.deepEqual(ins.counters, [{ name: "Ali", branches: "NDD Alpha", days: 1, skus: 2, minutes: 30, ok: 1, n: 2 }]);
+  assert.deepEqual(ins.mix, [{ branch: "NDD Alpha", ok: 0, within: 1, over: 1, nis: 0 }]);
+  const a = ins.abc.filter((x) => x.branch === "NDD Alpha").map((x) => x.cls + ":" + x.skus + ":" + x.target + ":" + x.times + ":" + x.once);
+  assert.deepEqual(a, ["A:2:4:1:1", "B:1:2:1:1", "C:1:1:0:0"]);
+  assert.deepEqual(ins.repeat, []);
+  await rejects(rpc("admin_dcc_insights", { p_token: TD, p_from: "2026-11-01", p_to: "2026-11-18" }), /login|admin/i);
+});
 await t("next day: yesterday closes and is logged; out-of-tolerance SKU comes back as a recount", async () => {
   await day("2026-11-19");
   const r = await rpc("plant_login", { p_code: "1501" }); assert.equal(r.take.countDate, "2026-11-19");
@@ -363,6 +382,9 @@ await t("next day: yesterday closes and is logged; out-of-tolerance SKU comes ba
   const o = await rpc("admin_dcc_day", { p_token: A2 }); assert.deepEqual(o.rows.find((x) => x.branch === "NDD Alpha").take.plan, { A1: "A", C3: "R" });
   const st = await rpc("admin_dcc_stats", { p_token: A2, p_from: "2026-11-18", p_to: "2026-11-19" });
   assert.equal(st.branches.find((x) => x.branch === "NDD Beta").cells[0].st, "missed");
+  const ins = await rpc("admin_dcc_insights", { p_token: A2, p_from: "2026-11-01", p_to: "2026-11-19" });
+  assert.equal(ins.counters[0].n, 2); assert.equal(ins.abc.find((x) => x.branch === "NDD Alpha" && x.cls === "A").times, 1);
+  assert.equal((await rpc("admin_dcc_today", { p_token: A2, p_date: "2026-11-18" })).rows.find((x) => x.branch === "NDD Beta").status, "missed");
 });
 await t("yesterday's count can't be changed any more", async () => {
   const old = (await db.query("select id from public.count_sessions where device_id = 'd-1'")).rows[0].id;

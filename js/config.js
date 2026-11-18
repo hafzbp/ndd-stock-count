@@ -8,4 +8,4 @@ if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /[?&]api=local/.test
   SUPABASE_URL = location.origin;
 }
 
-export var APP_VERSION = "2.4.0";
+export var APP_VERSION = "2.5.0";
