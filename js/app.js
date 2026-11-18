@@ -60,12 +60,13 @@ function drawHeader() {
   else { lk.replaceChildren(isAdmin() ? "🔓" : "🔒", el("span", { class: "lbl", text: isAdmin() ? " Log out" : " Admin" })); lk.title = isAdmin() ? "Log out" : "Admin login"; }
 }
 /* a counter is inside a count on this phone: header shows only Log out */
-function counterMode() { var m = cur(); return !isAdmin() && !!m && !!S.tokens[m.branch]; }
+/* also without a plant-code login (e.g. a count opened while logged in as admin): there must always be a way out */
+function counterMode() { return !isAdmin() && !!cur(); }
 
 async function counterLogout(done) {
   var m = cur(), br = m.branch;
   async function go() {
-    clearTimeout(S.timer); try { await flush(); } catch (e) { }
+    clearTimeout(S.timer); if (S.tokens[br]) { try { await flush(); } catch (e) { } }   /* no login: unsent changes wait on the phone */
     S.saveErr = null;
     /* stock take closed: counts are on the server, so the phone forgets them (unsent changes stay) */
     if (S.take && S.take.status === "closed") Object.keys(S.mine.sessions).forEach(function (k) { var x = S.mine.sessions[k]; if (x.branch === br && !x.dirty) delete S.mine.sessions[k]; });
@@ -89,7 +90,10 @@ function onLockBtn() {
   if (supMode()) { supLogout(); return; }
   if (counterMode()) { counterLogout(); return; }
   if (isAdmin()) {
-    var t = S.admin.token; S.admin = null; S.adm = null; S.viewTake = null; S.wiz = null; S.wizNew = false; saveTokens(); S.tab = "count"; render();
+    var t = S.admin.token; S.admin = null; S.adm = null; S.viewTake = null; S.wiz = null; S.wizNew = false; saveTokens(); S.tab = "count";
+    /* a count opened under the admin login has no plant-code login on this phone: leave it (it stays under "Continue a count") */
+    var m = cur(); if (m && !S.tokens[m.branch]) { S.mine.active = null; S.start = { step: "code" }; S.step = ""; backup(); }
+    render(); window.scrollTo(0, 0);
     rpc("logout", { p_token: t }).catch(function () { });
     return;
   }
