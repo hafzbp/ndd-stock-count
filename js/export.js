@@ -3,6 +3,7 @@ import { S } from "./state.js";
 import { el, fmt, bLabel, tsTxt, nowIso, openModal, closeModal, msg, saveBlob, loadJs, errText } from "./ui.js";
 import { monthOf, hasQty, sessRole } from "./pure.js";
 import { variance, branchesAdm, skuMap, tolPct, currentTake, isSingle } from "./master.js";
+import { listPhotos } from "./photos.js";
 
 var V = new URL("../vendor/", import.meta.url).href;
 function roleName(r) { return r === "fin" ? "Finance check" : "Ops count"; }
@@ -115,6 +116,39 @@ function logoData() {
   }).catch(function () { return null; });
 }
 
+/* Warehouse photos for the sign-off PDF: each session's photos as JPEG data plus their pixel size. */
+function imgData(url) {
+  return fetch(url).then(function (r) { if (!r.ok) throw new Error("photo " + r.status); return r.blob(); }).then(function (bl) {
+    return new Promise(function (ok, no) { var fr = new FileReader(); fr.onload = function () { var im = new Image(); im.onload = function () { ok({ data: fr.result, w: im.naturalWidth, h: im.naturalHeight }); }; im.onerror = no; im.src = fr.result; }; fr.onerror = no; fr.readAsDataURL(bl); });
+  });
+}
+async function sessionPhotos(ses) {
+  var out = [], miss = 0;
+  for (var i = 0; i < ses.length; i++) {
+    var x = ses[i]; if (!x.photos) continue;
+    var ps; try { ps = await listPhotos(x.id, S.admin.token); } catch (e) { miss += x.photos; continue; }
+    for (var j = 0; j < ps.length; j++) { try { var im = await imgData(ps[j].url); im.who = (sessRole(x) === "fin" ? "Finance" : "Ops") + " · " + (x.member || ""); out.push(im); } catch (e) { miss++; } }
+  }
+  out.miss = miss; return out;
+}
+function photoPages(d, W, list, sg) {
+  d.addPage(); var y = 16;
+  d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Warehouse photos (" + list.length + ")", 14, y); d.setFont("helvetica", "normal");
+  d.setFontSize(8); d.setTextColor(90); d.text("Taken in the app with the phone camera. Date, time, GPS and address are stamped on each photo.", 14, y + 5); d.setTextColor(0);
+  if (list.miss) { d.setTextColor(180, 0, 0); d.text(list.miss + " photo(s) could not be loaded into this PDF - see them in the app.", 14, y + 9); d.setTextColor(0); }
+  y += 13;
+  var cw = (W - 28 - 6) / 2, col = 0, rowH = 0;
+  list.forEach(function (im) {
+    var h = Math.min(cw * im.h / im.w, 118), w = h * im.w / im.h;
+    if (col === 0 && y + h + 6 > 285) { d.addPage(); y = 16; }
+    var x = 14 + col * (cw + 6) + (cw - w) / 2;
+    try { d.addImage(im.data, "JPEG", x, y, w, h); } catch (e) { }
+    if (!sg) { d.setFontSize(7.5); d.setTextColor(90); d.text(im.who, 14 + col * (cw + 6), y + h + 4); d.setTextColor(0); }
+    rowH = Math.max(rowH, h + 7);
+    if (col === 1) { y += rowH; rowH = 0; col = 0; } else col = 1;
+  });
+}
+
 export async function signoffPdf(b) {
   openModal(function (sh) { sh.append(el("h3", { text: "Preparing sign-off PDF…" }), el("p", { class: "muted", text: b })); });
   var J; try { J = await pdfLibs(); } catch (e) { return fail(e); }
@@ -164,6 +198,7 @@ export async function signoffPdf(b) {
   var signs = function (list, role) { if (!list.length) { box(role, "", "", ""); return; } list.forEach(function (x) { var nm = (x.names && x.names.length) ? x.names : [x.member]; nm.forEach(function (n) { var s = (x.sign || {})[n]; box(role, n, s && s.img, s && s.at); }); }); };
   if (sg) signs(ses, "Counted by"); else { signs(ops, "Counted by - Operations"); signs(fin, "Checked by - Finance"); }
   box("Branch Manager / Person in charge", "", "", ""); box("Reviewed by - Finance HQ", "", "", "");
+  var pics = await sessionPhotos(ses); if (pics.length || pics.miss) photoPages(d, W, pics, sg);
   var cnt = Vr.filter(function (o) { return o.status !== "NOT COUNTED"; });
   d.addPage(); d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Appendix - all counted lines (" + cnt.length + ")", 14, 16); d.setFont("helvetica", "normal");
   d.autoTable({ startY: 19, theme: "grid", styles: { fontSize: 7, cellPadding: 1.2 }, headStyles: { fillColor: [60, 60, 60] }, head: head, body: cnt.map(row), columnStyles: cs, margin: { left: 14, right: 14 } });

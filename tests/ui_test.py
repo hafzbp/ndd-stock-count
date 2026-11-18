@@ -1,6 +1,6 @@
 # End-to-end UI test against the local backend (node server.mjs with BOOTSTRAP_CODE=SETUP-123).
 # Each browser context = one phone. Ops phone uses a fake camera showing the real Nabati barcode.
-import os, sys
+import os, time, sys
 from playwright.sync_api import sync_playwright
 from openpyxl import Workbook
 from PIL import Image
@@ -47,7 +47,9 @@ with sync_playwright() as p:
     def phone(w=390, h=844, ua=None):
         kw = dict(viewport={"width": w, "height": h}, is_mobile=w < 600, has_touch=w < 600, accept_downloads=True)
         if ua: kw["user_agent"] = ua
-        ctx = br.new_context(**kw); ctx.grant_permissions(["camera"])
+        kw["geolocation"] = {"latitude": 3.0732, "longitude": 101.5183, "accuracy": 12}
+        ctx = br.new_context(**kw); ctx.grant_permissions(["camera", "geolocation"])
+        ctx.route("https://nominatim.openstreetmap.org/**", lambda r: r.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body='{"display_name":"Jalan Test 23, Seksyen 23, Shah Alam, Selangor, 40300, Malaysia"}'))
         pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append(str(e))); pg.on("console", lambda m: m.type == "error" and "ERR_INTERNET_DISCONNECTED" not in m.text and errs.append("console: " + m.text))
         return pg
 
@@ -129,7 +131,21 @@ with sync_playwright() as p:
     print("submit with photos")
     op.click("#footIn >> text=Submit"); op.wait_for_selector("#sheet >> text=Are you sure"); op.check("#sheet input[type=checkbox]"); sign(op, 0); sign(op, 1)
     check("submit disabled with 0 photos", op.is_disabled("#sheet >> text=Yes, submit"))
-    op.set_input_files("#sheet input[type=file][multiple]", [f"{OUT}/p0.jpg", f"{OUT}/p1.jpg", f"{OUT}/p2.jpg"]); op.wait_for_selector("#sheet >> text=3 of 5 photos", timeout=15000)
+    check("camera only: no gallery button", not op.is_visible("#sheet >> text=From gallery") and op.locator("#sheet input[type=file]").count() == 1)
+    old_t = time.time() - 3600; os.utime(f"{OUT}/p3.jpg", (old_t, old_t))
+    op.set_input_files("#sheet input[type=file]", f"{OUT}/p3.jpg"); op.wait_for_selector("#sheet >> text=Take a new photo with the camera")
+    check("an old photo (from the gallery) is refused", "0 of 5 photos" in op.inner_text("#sheet"))
+    for i in range(3):
+        os.utime(f"{OUT}/p{i}.jpg", None)
+        op.set_input_files("#sheet input[type=file]", f"{OUT}/p{i}.jpg"); op.wait_for_selector(f"#sheet >> text={i + 1} of 5 photos", timeout=15000)
+    check("location note shown", "Location found" in op.inner_text("#sheet"), op.inner_text("#sheet")[:400])
+    dark = op.evaluate("""async () => { const im = document.querySelector('#sheet .pthumb img'); await im.decode(); const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const x = c.getContext('2d'); x.drawImage(im, 0, 0);
+      const lum = (a) => { let t = 0; for (let i = 0; i < a.length; i += 4) t += (a[i] + a[i+1] + a[i+2]) / 3; return t / (a.length / 4); };
+      return { band: lum(x.getImageData(c.width - 40, c.height - 6, 30, 4).data), top: lum(x.getImageData(10, 10, 30, 4).data), mid: lum(x.getImageData(0, c.height - 120, c.width, 100).data) }; }""")
+    check("photo has a dark stamp band at the bottom", dark["band"] < dark["top"] * 0.6, dark)
+    sl = op.evaluate("""async () => { const m = await import('./js/photos.js'); return [m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: {lat: 3.0732, lon: 101.5183, acc: 12}, addr: 'Jalan Test 23, Shah Alam', who: 'NDD Alpha · Stock take · Ali'}), m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: null})]; }""")
+    check("stamp text: date+time MYT, GPS, address, who", sl[0] == ["18 Nov 2026, 10:52:13 MYT", "GPS 3.073200, 101.518300 (±12 m)", "Jalan Test 23, Shah Alam", "NDD Alpha · Stock take · Ali"], sl[0])
+    check("stamp text without location: 'Location not shared'", sl[1] == ["18 Nov 2026, 10:52:13 MYT", "Location not shared"], sl[1])
     check("submit enabled with 3 photos", not op.is_disabled("#sheet >> text=Yes, submit"))
     op.click("#sheet >> text=Yes, submit"); op.wait_for_selector("text=Submitted ✓", timeout=10000); check("submitted, locked", not op.is_visible("#footIn >> text=Submit"))
 
@@ -161,6 +177,8 @@ with sync_playwright() as p:
     op.reload(); op.wait_for_selector("text=Recount needed on", timeout=10000); check("ops phone gets recount + reopened", op.is_visible("#footIn >> text=Submit"))
     with ow.expect_download() as d2: ow.click(B("Sign-off PDF"))
     d2.value.save_as(f"{OUT}/signoff.pdf"); check("sign-off PDF downloads", os.path.getsize(f"{OUT}/signoff.pdf") > 5000); ow.click(SB("OK"))
+    pdfb = open(f"{OUT}/signoff.pdf", "rb").read()
+    check("sign-off PDF has the warehouse photo page with 3 photos", b"Warehouse photos \\(3\\)" in pdfb and pdfb.count(b"/Subtype /Image") >= 4, (pdfb.count(b"/Subtype /Image"), os.path.getsize(f"{OUT}/signoff.pdf")))
     db = phone(1280, 800); db.goto(BASE + "/dashboard/?api=local"); db.wait_for_selector("text=NDD Alpha")
     t = db.inner_text("main"); check("dashboard: progress while open", "Variance is not published" in t and "Ops: Counting" in t, t[:300])
     ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector(".state.open"); ow.click(B("Close counting")); ow.click("#sheet button:text-is('Close')"); ow.wait_for_selector(".state.closed")
