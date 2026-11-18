@@ -320,6 +320,11 @@ await t("today's list: monthly need spread over the remaining working days, A fi
   assert.deepEqual(be.take.plan, { A1: "A" });
   const again = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(again.rows.find((x) => x.branch === "NDD Alpha").take.id, al.take.id);
 });
+await t("uploading the MB52 again after today's list exists keeps the ABC (rebuilt during the upload)", async () => {
+  await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-17", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
+  const a = await rpc("admin_abc", { p_token: A2, p_branch: "NDD Alpha" });
+  assert.deepEqual(a.rows.map((x) => x.code + ":" + x.cls), ["D4:A", "A1:A", "C3:B", "B2:C"]);
+});
 await t("counter gets today's daily list after the plant code", async () => {
   const r = await rpc("plant_login", { p_code: "1501" }); TD = r.token; assert.equal(r.take.kind, "daily"); assert.equal(r.take.countDate, "2026-11-18"); assert.equal(r.take.countTo, "10:00");
   const b = await rpc("counter_branch", { p_token: TD, p_branch: "NDD Alpha" }); assert.deepEqual(b.codes, ["D4"]); assert.deepEqual(b.batches, { D4: ["2027-01"] });
