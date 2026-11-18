@@ -92,6 +92,7 @@ with sync_playwright() as p:
 
     print("ops phone")
     op.click(B("Try again")); op.wait_for_selector("text=Your warehouse"); check("after opening: confirm screen shows warehouse", "NDD Alpha" in op.inner_text("main"))
+    km = op.inner_text(".kind-monthly"); check("confirm: big MONTHLY label with the stock take name", "MONTHLY STOCK TAKE" in km and "Ops + Finance" in km, km)
     op.click(B("Yes, that's my warehouse")); op.wait_for_selector("text=Which team are you?"); op.click(".big:has-text('Ops team counts')")
     op.wait_for_selector("text=Who is counting?"); op.click(".big:has-text('Ali Rahman')"); op.click(".big:has-text('Budi')"); op.click(B("Start ops count"))
     op.wait_for_selector("text=OPS COUNT"); op.wait_for_selector("text=0 / 3 SKUs counted"); check("count screen opens with 3 SKUs", True)
@@ -179,7 +180,7 @@ with sync_playwright() as p:
     ow.click("main button:text-is('Open counting')"); ow.click("#sheet button:text-is('Open')"); ow.wait_for_selector(".state.open")
     op.reload(); op.wait_for_selector("text=Enter your warehouse plant code"); check("old counts gone on phone after new stock take", True)
     code(op, "1501"); op.click(B("Yes, that's my warehouse")); op.click(".big:has-text('Ops team counts')"); op.click(".big:has-text('Ali Rahman')"); op.click(B("Start ops count"))
-    op.wait_for_selector("text=Partial count"); check("partial: counter sees 1 SKU", "1 SKU(s) to count at this warehouse" in op.inner_text("main") and "0 / 1 SKUs counted" in op.inner_text("main"), op.inner_text("main")[:300])
+    op.wait_for_selector(".kind-monthly >> text=only 1 SKU on your list"); check("partial: counter sees 1 SKU", "MONTHLY STOCK TAKE" in op.inner_text(".kind-monthly") and "0 / 1 SKUs counted" in op.inner_text("main"), op.inner_text("main")[:300])
     ow.wait_for_selector("text=History"); ow.click("button.link:has-text('View (read-only)')"); ow.wait_for_selector("text=History (read-only): Test count")
     check("history opens read-only in Master", not ow.is_visible(B("Close counting")) and not ow.is_visible(B("Send recount list")))
     ow.click(B("Back to current")); ow.wait_for_timeout(800)

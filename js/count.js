@@ -9,6 +9,22 @@ import { photoBlock } from "./photos.js";
 export var REMARKS = ["Damaged", "Expired", "Near expiry", "Wrong location"];
 function singleMode() { return !!(S.take && S.take.mode === "single"); }
 export function roleName(r) { return singleMode() ? "Count" : r === "fin" ? "Finance check" : "Ops count"; }
+
+/* Daily cycle count vs monthly stock take: one big coloured label so the counter always knows which one this is. */
+var WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function dayTxt(d) { if (!d) return ""; var x = new Date(d + "T00:00:00"); return isNaN(x) ? d : WD[x.getDay()] + " " + x.getDate() + " " + MN[x.getMonth()]; }
+export function kindShort() { return S.take && S.take.kind === "daily" ? "Daily count" : "Monthly stock take"; }
+export function kindLabel(n) {
+  var t = S.take || {};
+  if (t.kind === "daily") {
+    var parts = [dayTxt(t.countDate), (n == null ? t.skuCount : n) + " SKU" + ((n == null ? t.skuCount : n) === 1 ? "" : "s")];
+    if (t.countTo) parts.push("finish by " + t.countTo);
+    return el("div", { class: "kind kind-daily" }, el("b", { text: "DAILY CYCLE COUNT" }), el("span", { text: parts.join(" · ") }));
+  }
+  var sub = [t.name || "Stock take", singleMode() ? "single count" : "Ops + Finance count separately"];
+  if (t.scope === "partial") sub.push(n == null ? "only the SKUs on your list" : "only " + n + " SKU" + (n === 1 ? "" : "s") + " on your list");
+  return el("div", { class: "kind kind-monthly" }, el("b", { text: "MONTHLY STOCK TAKE" }), el("span", { text: sub.join(" · ") }));
+}
 function roleOf(t) { return t.role || "Checker"; }
 
 /* ---------- plant code (branch login) ---------- */
@@ -91,8 +107,7 @@ export function renderCount(app) {
       el("button", { class: "btn primary", text: "Done - back to start", onclick: function () { if (hooks.counterLogout) hooks.counterLogout(true); } })));
   }
   else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + ". Ask your admin to reopen if anything needs changing." }));
-  if (S.take && S.take.kind === "daily") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Today's cycle count · " + (bd.codes || []).length + " SKU(s) on the list"));
-  else if (S.take && S.take.scope === "partial") app.append(el("div", { class: "banner", style: "background:var(--chip);color:var(--ink)" }, "Partial count · " + (bd.codes || []).length + " SKU(s) to count at this warehouse"));
+  app.append(kindLabel(S.take && (S.take.kind === "daily" || S.take.scope === "partial") ? (bd.codes || []).length : null));
   if (singleMode()) app.append(el("div", { class: "banner", style: "background:var(--okbg);color:var(--ok)" }, "COUNT - count every SKU and batch you find, then submit."));
   else app.append(el("div", { class: "banner", style: "background:" + (sessRole(m) === "fin" ? "var(--badbg);color:var(--accent)" : "var(--okbg);color:var(--ok)") },
     (sessRole(m) === "fin" ? "FINANCE CHECK" : "OPS COUNT") + " - count everything yourself. Do not share or compare numbers with the other team."));
@@ -389,7 +404,7 @@ function renderStart(app) {
       return;
     }
     app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: "Your warehouse" }), el("h2", { style: "font-size:24px;margin:6px 0 14px", text: st.branch }),
-      S.take && S.take.kind === "daily" ? el("p", { class: "small", text: "Today's cycle count: " + S.take.skuCount + " SKU(s) on the list." }) : S.take && S.take.scope === "partial" ? el("p", { class: "small", text: "Partial count: only the SKUs your admin picked." }) : null,
+      kindLabel(),
       el("div", { class: "row", style: "justify-content:center" },
         el("button", { class: "btn primary", text: "Yes, that's my warehouse", onclick: function () { if (singleMode()) { st.role = "ops"; st.names = st.names || []; st.step = "names"; } else st.step = "team"; hooks.render(); } }),
         el("button", { class: "btn", text: "No, enter again", onclick: reset }))));

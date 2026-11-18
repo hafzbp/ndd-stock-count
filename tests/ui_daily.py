@@ -49,12 +49,15 @@ with sync_playwright() as p:
 
     print("counter: today's list")
     op = page(390, 844); op.goto(BASE + "/?api=local"); op.wait_for_selector("text=Enter your warehouse plant code"); pad(op, "1501")
-    op.wait_for_selector("text=Today's cycle count"); check("confirm shows today's cycle count", "1 SKU(s)" in op.inner_text("main"), op.inner_text("main"))
+    op.wait_for_selector(".kind-daily"); kt = op.inner_text(".kind-daily")
+    check("confirm: big DAILY label with date, SKU count and finish time", "DAILY CYCLE COUNT" in kt and "1 SKU" in kt and "finish by 10:00" in kt and "18 Nov" in kt, kt)
+    check("confirm: no monthly label", not op.is_visible(".kind-monthly"))
     op.click(B("Yes, that's my warehouse")); op.wait_for_selector("text=Who is counting?")
     check("daily = single count: no team step", not op.is_visible("text=Which team are you?"))
     op.fill("input[placeholder*='name' i]", "Siti"); op.keyboard.press("Enter"); op.wait_for_timeout(300)
-    op.click(B("Start count")); op.wait_for_selector("text=Today's cycle count · 1 SKU(s)")
-    check("count screen: today's banner", True)
+    op.click(B("Start count")); op.wait_for_selector(".kind-daily")
+    check("count screen: daily label stays on top", "DAILY CYCLE COUNT" in op.inner_text(".kind-daily"))
+    check("header says Daily count", op.inner_text("#sub").startswith("Daily count · NDD Alpha"), op.inner_text("#sub"))
     op.click(".skuh:has-text('A1')"); op.wait_for_timeout(200); op.locator(".sku:has-text('A1') .batch").first.locator(".val").last.click()
     [op.click(f"#sheet .pad button:text-is('{k}')") for k in "355"]; op.click(SB("OK")); op.wait_for_timeout(2500)
 
@@ -80,7 +83,7 @@ with sync_playwright() as p:
     sp.click(B("This month's plan")); sp.wait_for_selector("#sheet >> text=ABC 20"); check("plan modal opens (supervisor can see the ABC plan)", "A1" in sp.inner_text("#sheet")); sp.click(SB("Close"))
     sp.screenshot(path=f"{OUT}/sup.png", full_page=True); sp.click("#lockBtn"); sp.wait_for_selector("text=Enter your warehouse plant code"); check("supervisor log out back to start", True)
     op.reload(); op.wait_for_timeout(1500); op.click(".seg button:text-is('All')") if op.is_visible(".seg button:text-is('All')") else None
-    check("counter now sees the added SKU (2 on the list)", "2 SKU(s)" in op.inner_text("main"), op.inner_text("main")[:300])
+    check("counter now sees the added SKU (2 on the list)", "2 SKUs" in op.inner_text(".kind-daily"), op.inner_text("main")[:300])
 
     print("dashboards")
     ow.click("#tabs button:text-is('Dashboard')"); ow.wait_for_selector("text=Compliance · warehouse × day")
@@ -93,7 +96,7 @@ with sync_playwright() as p:
     ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Daily cycle count"); ow.locator(".card:has(h3:text-is('Daily cycle count'))").screenshot(path=f"{OUT}/admin_dccset.png")
 
     print("offline change + log out + phone syncs to another stock take: the unsent count survives")
-    op.wait_for_selector("text=Today's cycle count"); op.context.set_offline(True)
+    op.wait_for_selector(".kind-daily"); op.context.set_offline(True)
     op.click(".seg button:text-is('All')"); op.wait_for_timeout(200)
     if not op.is_visible(".sku:has-text('A1') .batch"): op.click(".skuh:has-text('A1')"); op.wait_for_timeout(200)
     op.locator(".sku:has-text('A1') .batch").first.locator(".val").last.click(); [op.click(f"#sheet .pad button:text-is('{k}')") for k in ["C", "3", "5", "6"]]; op.click(SB("OK")); op.wait_for_timeout(1500)
@@ -105,7 +108,7 @@ with sync_playwright() as p:
     if op.is_visible(B("Different warehouse")): op.click(B("Different warehouse")); op.wait_for_timeout(500)
     check("after sync to another stock take: unsent count still on the phone", op.is_visible("text=Continue a count") and "kept on phone" in op.inner_text("#pill").lower(), op.inner_text("main")[:300] + " | " + op.inner_text("#pill"))
     op.click(".big:has-text('NDD Alpha')"); op.wait_for_selector("#sheet .pad"); [op.click(f"#sheet .pad button:text-is('{d}')") for d in "1501"]; op.click("#sheet button:text-is('Next')")
-    op.wait_for_selector("text=Today's cycle count"); op.wait_for_timeout(3500)
+    op.wait_for_selector(".kind-daily"); op.wait_for_timeout(3500)
     check("logged in again: the change uploads", "All saved" in op.inner_text("#pill"), op.inner_text("#pill"))
     ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily counts ·"); ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('View')"); ow.wait_for_selector("text=Daily count (read-only)")
     check("HQ sees 356 (the offline change), not 355", "356" in ow.inner_text("main") and "355" not in ow.inner_text("main"), ow.inner_text("main")[:500])

@@ -2,7 +2,7 @@
 import { S, hooks, loadLocal, saveTokens, sync, flush, syncPill, cur, isAdmin, isOwner, anyDirty, backup } from "./state.js";
 import { rpc } from "./api.js";
 import { $, el, pill, msg, openModal, closeModal, errText, labelTables, confirmBox, toast } from "./ui.js";
-import { renderCount, withPin, loadMaster, loadBranch, roleName } from "./count.js";
+import { renderCount, withPin, loadMaster, loadBranch, roleName, kindShort } from "./count.js";
 import { renderMaster, loadAdmin } from "./master.js";
 import { renderSetup } from "./setup.js";
 import { renderHome } from "./home.js";
@@ -16,7 +16,7 @@ window.addEventListener("resize", setHH);
 function render() {
   setHH();
   var m = cur();
-  $("#sub").textContent = m && m.member ? (m.branch + " · " + roleName(sessRole(m)) + " · " + m.member) : (isOwner() ? "Owner" : isAdmin() ? "Admin" : supMode() ? "Supervisor · " + S.sup.branch : ((S.take && S.take.name) || "Stock take"));
+  $("#sub").textContent = m && m.member ? (kindShort() + " · " + m.branch + " · " + (S.take && S.take.mode === "single" ? "" : roleName(sessRole(m)) + " · ") + m.member) : (isOwner() ? "Owner" : isAdmin() ? "Admin" : supMode() ? "Supervisor · " + S.sup.branch : ((S.take && S.take.name) || "Stock take"));
   if (S.cfg && S.cfg.title) { $("#title").textContent = S.cfg.title; document.title = S.cfg.title; }
   drawHeader();
   if (!S.cfg) return;

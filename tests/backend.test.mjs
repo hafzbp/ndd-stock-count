@@ -321,7 +321,7 @@ await t("today's list: monthly need spread over the remaining working days, A fi
   const again = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(again.rows.find((x) => x.branch === "NDD Alpha").take.id, al.take.id);
 });
 await t("counter gets today's daily list after the plant code", async () => {
-  const r = await rpc("plant_login", { p_code: "1501" }); TD = r.token; assert.equal(r.take.kind, "daily"); assert.equal(r.take.countDate, "2026-11-18");
+  const r = await rpc("plant_login", { p_code: "1501" }); TD = r.token; assert.equal(r.take.kind, "daily"); assert.equal(r.take.countDate, "2026-11-18"); assert.equal(r.take.countTo, "10:00");
   const b = await rpc("counter_branch", { p_token: TD, p_branch: "NDD Alpha" }); assert.deepEqual(b.codes, ["D4"]); assert.deepEqual(b.batches, { D4: ["2027-01"] });
 });
 await t("supervisor: HQ creates PIN (shown once), wrong PIN fails, must change at first login", async () => {
@@ -386,7 +386,7 @@ await t("monthly stock take open at a warehouse takes over from the daily count"
   await rpc("admin_draft", { p_token: A2, p_name: "Monthly Nov", p_scope: "total", p_skus: [] });
   await rpc("admin_load_mb52", { p_token: A2, p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
   await rpc("admin_set_status", { p_token: A2, p_status: "open" });
-  const r = await rpc("plant_login", { p_code: "1501" }); assert.equal(r.take.kind, "monthly"); assert.equal(r.take.name, "Monthly Nov");
+  const r = await rpc("plant_login", { p_code: "1501" }); assert.equal(r.take.kind, "monthly"); assert.equal(r.take.name, "Monthly Nov"); assert.equal(r.take.countTo, null);
   assert.equal((await rpc("admin_dcc_day", { p_token: A2 })).rows.find((x) => x.branch === "NDD Alpha").why, "monthly");
   assert.equal((await rpc("admin_load", { p_token: A2 })).takes.every((x) => x.kind === "monthly"), true);
   await rpc("admin_set_status", { p_token: A2, p_status: "closed" });

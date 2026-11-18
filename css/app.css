@@ -1,5 +1,5 @@
-:root{color-scheme:light dark;--bg:#f6f5f2;--card:#fff;--ink:#1d1d1b;--mute:#6b6a66;--line:#e4e2dc;--chip:#efede8;--accent:#c8102e;--ok:#1f7a4d;--okbg:#e3f3ea;--warn:#a46200;--warnbg:#fdf0dc;--bad:#b3261e;--badbg:#fbe4e2}
-@media (prefers-color-scheme:dark){:root{--bg:#141414;--card:#1e1e1d;--ink:#f1f0ec;--mute:#a3a19b;--line:#33322f;--chip:#2a2927;--accent:#ff4d64;--ok:#5fd39b;--okbg:#173526;--warn:#f2b04c;--warnbg:#3a2a10;--bad:#ff7a6e;--badbg:#3d1714}}
+:root{color-scheme:light dark;--bg:#f6f5f2;--card:#fff;--ink:#1d1d1b;--mute:#6b6a66;--line:#e4e2dc;--chip:#efede8;--accent:#c8102e;--ok:#1f7a4d;--okbg:#e3f3ea;--warn:#a46200;--warnbg:#fdf0dc;--bad:#b3261e;--badbg:#fbe4e2;--info:#1d5fbf;--infobg:#e3edfb;--mon:#a14a00;--monbg:#fde7d3}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--card:#1e1e1d;--ink:#f1f0ec;--mute:#a3a19b;--line:#33322f;--chip:#2a2927;--accent:#ff4d64;--ok:#5fd39b;--okbg:#173526;--warn:#f2b04c;--warnbg:#3a2a10;--bad:#ff7a6e;--badbg:#3d1714;--info:#8dbaff;--infobg:#142a47;--mon:#ffa25c;--monbg:#3d230f}}
 a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -187,3 +187,8 @@ tr.tot td{font-weight:700;background:var(--chip)}
 
 .wd{border:1px solid var(--line);background:transparent;border-radius:6px;padding:3px 5px;font-size:11.5px;cursor:pointer;color:var(--mute)}.wd.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
 .guide{border-left:4px solid var(--accent);border-radius:0 12px 12px 0}.steps-ol{margin:6px 0 0;padding-left:20px}.steps-ol li{margin:6px 0;line-height:1.45}
+
+.kind{border-radius:10px;padding:10px 14px;margin:0 0 12px;display:flex;flex-direction:column;gap:2px;border-left:5px solid currentColor;text-align:left}
+.kind b{font-size:15px;letter-spacing:.04em}.kind span{font-size:13px;font-weight:600;opacity:.92}
+.kind-daily{background:var(--infobg);color:var(--info)}.kind-monthly{background:var(--monbg);color:var(--mon)}
+.card.center .kind{margin:4px 0 14px}
