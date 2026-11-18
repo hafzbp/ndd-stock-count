@@ -5,6 +5,7 @@ import { el, fmt, tsTxt, msg, errText, openModal, closeModal } from "./ui.js";
 import { loadAdmin } from "./master.js";
 import { mb52Card } from "./setup.js";
 import { dayStatus, clsTag, renderDccStats } from "./dcc.js";
+import { exportDailyReport, dailyPdf } from "./export.js";
 
 function tok() { return S.admin.token; }
 function iso(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
@@ -49,11 +50,31 @@ export function renderDaily(app) {
       el("td", { class: "row", style: "gap:6px;flex-wrap:nowrap" },
         tk ? el("button", { class: "link", text: "View", onclick: function () { S.viewTake = tk.id; S.mBranch = r.branch; S.tab = "master"; loadAdmin().then(hooks.render); window.scrollTo(0, 0); } }) : null,
         tk ? el("button", { class: "link", text: "List", onclick: function () { showList(r); } }) : null,
+        tk ? el("button", { class: "link", text: "PDF", title: "Daily sign-off PDF", onclick: function () { dailyPdf(r.branch, d); } }) : null,
         el("button", { class: "link", text: "ABC", onclick: function () { showAbc(r.branch, tok()); } }))));
   });
   if (!rows.length) t.append(el("tr", {}, el("td", { colspan: 6, class: "muted", text: "No warehouses yet." })));
-  app.append(el("div", { class: "card" }, el("div", { class: "row", style: "justify-content:space-between" }, el("h3", { style: "margin:0", text: "Daily counts · " + niceDate(d) }), nav),
+  app.append(el("div", { class: "card" }, el("div", { class: "row", style: "justify-content:space-between" }, el("h3", { style: "margin:0", text: "Daily counts · " + niceDate(d) }),
+      el("div", { class: "row", style: "gap:6px" }, nav, el("button", { class: "btn", text: "⬇ Export report", onclick: function () { reportDialog(today, rows.map(function (r) { return r.branch; })); } }))),
     el("p", { class: "small muted", text: Object.keys(cnt).map(function (k) { return k + ": " + cnt[k]; }).join(" · ") }), el("div", { class: "tw" }, t)));
+}
+
+/* period + warehouse for the daily Excel report */
+export function reportDialog(today, branches, from, to, only) {
+  openModal(function (sh) {
+    var f = el("input", { type: "date", value: from || today.slice(0, 8) + "01", max: today }), t = el("input", { type: "date", value: to || today, max: today });
+    var w = el("select", {}, [el("option", { value: "", text: "All warehouses" })].concat(branches.map(function (b) { return el("option", { value: b, text: b, selected: only && only.length === 1 && only[0] === b }); })));
+    var err = el("p", { class: "small", style: "color:var(--bad)" });
+    sh.append(el("h3", { text: "Daily cycle count report (Excel)" }),
+      el("p", { class: "small muted", text: "Summary per warehouse per working day, every SKU line counted, and SKUs out of tolerance again and again. Up to 2 months." }),
+      el("label", { class: "small", text: "From" }), f, el("label", { class: "small", text: "To" }), t, el("label", { class: "small", text: "Warehouse" }), w, err,
+      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "btn", text: "Cancel", onclick: closeModal }),
+        el("button", { class: "btn primary", text: "Export", onclick: function () {
+          if (!f.value || !t.value || t.value < f.value) { err.textContent = "Pick a valid period."; return; }
+          if ((new Date(t.value) - new Date(f.value)) / 864e5 > 62) { err.textContent = "Pick at most 2 months."; return; }
+          exportDailyReport(f.value, t.value, w.value ? [w.value] : (only || null));
+        } })));
+  });
 }
 
 function showList(r) {

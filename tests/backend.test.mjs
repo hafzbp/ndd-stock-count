@@ -379,6 +379,32 @@ await t("dashboard 2: region + NOM per warehouse; today per warehouse (status, t
   assert.deepEqual(ins.repeat, []);
   await rejects(rpc("admin_dcc_insights", { p_token: TD, p_from: "2026-11-01", p_to: "2026-11-18" }), /login|admin/i);
 });
+await t("daily report: every daily count in a period with SKU/batch results (export + daily sign-off PDF)", async () => {
+  await rejects(rpc("admin_dcc_report", { p_token: TD, p_from: "2026-11-18", p_to: "2026-11-18" }), /login|admin/i);
+  await rejects(rpc("admin_dcc_report", { p_token: A2, p_from: "2026-09-01", p_to: "2026-11-18" }), /at most 2 months/);
+  const r = await rpc("admin_dcc_report", { p_token: A2, p_from: "2026-11-01", p_to: "2026-11-18" });
+  const al = r.takes.find((x) => x.branch === "NDD Alpha");
+  assert.equal(al.date, "2026-11-18"); assert.equal(al.listed, 2); assert.equal(al.who, "Ali"); assert.equal(al.late, false);
+  assert.equal(al.from, "07:00"); assert.equal(al.to, "10:00"); assert.equal(al.snapDate, "2026-11-17"); assert.equal(al.region, "Central");
+  assert.deepEqual(Object.keys(al.plan).sort(), ["C3", "D4"]);
+  const fl = {}; al.lines.forEach((l) => { fl[l.code] = l.flag; });
+  assert.deepEqual(fl, { C3: "OVER", D4: "WITHIN" });
+  assert.ok(al.lines.every((l) => "sys" in l && "phys" in l && "vv" in l && "desc" in l));
+  const one = await rpc("admin_dcc_report", { p_token: A2, p_from: "2026-11-18", p_to: "2026-11-18", p_branch: "NDD Beta" });
+  assert.deepEqual(one.takes.map((x) => x.branch), ["NDD Beta"]); assert.equal(one.takes[0].submittedAt, null);
+});
+await t("SKU variance = total counted minus total system (a batch not found counts as 0)", async () => {
+  const id = (await db.query("insert into public.stock_takes (name, kind, branch, count_date, status, mode, scope, skus) values ('Daily x', 'daily', 'NDD Alpha', '2026-11-16', 'open', 'single', 'partial', '{A1}') returning id")).rows[0].id;
+  await db.query("insert into public.sys_stock (take_id, branch, code, batch, qty, unit_cost) values ($1, 'NDD Alpha', 'A1', '2027-03', 264, 2), ($1, 'NDD Alpha', 'A1', '2027-05', 120, 2)", [id]);
+  const lines = { "A1|2027-03": L("A1", "2027-03", null, null, 380) };
+  await db.query("insert into public.count_sessions (take_id, device_id, branch, role, data, status, submitted_at) values ($1, 'd-x', 'NDD Alpha', 'ops', $2, 'submitted', now())", [id, JSON.stringify({ member: "Ali", names: ["Ali"], lines })]);
+  await db.query("select private.log_take($1)", [id]);
+  const lg = (await db.query("select sys_q, phys_q, var_q, var_rm, flag from public.count_log where take_id = $1", [id])).rows[0];
+  assert.equal(Number(lg.sys_q), 384); assert.equal(Number(lg.phys_q), 380); assert.equal(Number(lg.var_q), -4); assert.equal(Number(lg.var_rm), -8); assert.equal(lg.flag, "WITHIN");
+  const rep = await rpc("admin_dcc_report", { p_token: A2, p_from: "2026-11-16", p_to: "2026-11-16", p_branch: "NDD Alpha" });
+  assert.deepEqual(rep.takes[0].lines.map((l) => l.batch + ":" + l.status).sort(), ["2027-03:MATCH", "2027-05:NOT COUNTED"]);
+  await db.query("delete from public.stock_takes where id = $1", [id]);
+});
 await t("next day: yesterday closes and is logged; out-of-tolerance SKU comes back as a recount", async () => {
   await day("2026-11-19");
   const r = await rpc("plant_login", { p_code: "1501" }); assert.equal(r.take.countDate, "2026-11-19");

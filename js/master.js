@@ -10,13 +10,17 @@ export async function loadAdmin() {
   var r = await rpc("admin_load", { p_token: S.admin.token, p_take: S.viewTake || null });
   S.adm = r;
   S.admin.kind = r.kind;
-  S.counts = (r.sessions || []).map(function (s) {
+  S.counts = docsFrom(r.sessions);
+  S.sysBy = r.sys || {};
+  return r;
+}
+/* count sessions from admin_load as the documents the variance and the PDFs use */
+export function docsFrom(sessions) {
+  return (sessions || []).map(function (s) {
     var d = s.data || {};
     return { id: s.id, branch: s.branch, role: s.role, member: d.member || "", names: d.names || [], lines: d.lines || {}, extraSkus: d.extraSkus || [],
       sign: d.sign || null, unknownBarcodes: d.unknownBarcodes || {}, status: s.status, submittedAt: s.submittedAt, updatedAt: s.updatedAt, photos: s.photos || 0, device: s.device };
   });
-  S.sysBy = r.sys || {};
-  return r;
 }
 export function branchesAdm() { return ((S.adm && S.adm.branches) || []).filter(function (b) { return b.active; }).map(function (b) { return b.name; }); }
 export function skuMap() { var m = {}; ((S.adm && S.adm.skus) || []).forEach(function (s) { m[s.code] = s; }); return m; }

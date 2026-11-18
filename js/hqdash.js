@@ -4,6 +4,7 @@ import { S, hooks } from "./state.js";
 import { rpc } from "./api.js";
 import { el, fmt, msg, errText } from "./ui.js";
 import { renderDccStats, ensureDccCss, ST } from "./dcc.js";
+import { exportDailyReport } from "./export.js";
 
 var TARGET = 98;
 function tok() { return S.admin.token; }
@@ -54,6 +55,7 @@ export function renderDash(app) {
     vals("nom").length ? pick(P.nom, "All NOMs", vals("nom"), function (v) { P.nom = v; }) : null,
     pick(P.br, "All warehouses", names, function (v) { P.br = v; }),
     el("button", { class: "btn", text: "↻", title: "Refresh", onclick: function () { S.dashData = null; S.dashIns = null; S.dashToday = null; hooks.render(); } }),
+    el("button", { class: "btn", text: "⬇ Export", title: "Excel report for this period and these warehouses", onclick: function () { exportDailyReport(from, to, (P.region || P.nom || P.br) ? rows.map(function (r) { return r.branch; }).filter(inScope) : null); } }),
     el("a", { class: "link small", href: "dashboard/", target: "_blank", rel: "noopener", text: "Public view (no RM) ↗" })));
 
   if (!S.dashData || S.dashKey !== key || !S.dashIns || !S.dashToday) {

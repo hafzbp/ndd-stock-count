@@ -2,7 +2,8 @@
 import { S } from "./state.js";
 import { el, fmt, bLabel, tsTxt, nowIso, openModal, closeModal, msg, saveBlob, loadJs, errText } from "./ui.js";
 import { monthOf, hasQty, sessRole } from "./pure.js";
-import { variance, branchesAdm, skuMap, tolPct, currentTake, isSingle } from "./master.js";
+import { variance, branchesAdm, skuMap, tolPct, currentTake, isSingle, docsFrom } from "./master.js";
+import { rpc } from "./api.js";
 import { listPhotos } from "./photos.js";
 
 var V = new URL("../vendor/", import.meta.url).href;
@@ -207,4 +208,166 @@ export async function signoffPdf(b) {
   window.__pdf = d.output("datauristring");
   saveBlob(d.output("blob"), fname);
   openModal(function (sh) { sh.append(el("h3", { text: "Saved ✓" }), el("p", { class: "muted", text: fname + (final ? "" : " (marked DRAFT)") }), el("button", { class: "btn block", text: "OK", onclick: closeModal })); });
+}
+
+/* ================= Daily cycle count: Excel report + sign-off PDF ================= */
+var CLS = { A: "A", B: "B", C: "C", R: "R (recount)", S: "S (supervisor added)" };
+var DAYST = { ontime: "On time", late: "Late", missed: "Missed", progress: "Counting", todo: "Not started", skip: "Skipped", off: "Off day", none: "Nothing due", future: "" };
+function kl(ts) { return ts ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kuala_Lumpur", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ts)) : ""; }
+function hm(ts) { return ts ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kuala_Lumpur", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ts)) : ""; }
+function dayTxt(s) { if (!s) return ""; var d = new Date(s + "T00:00:00"); return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }); }
+function r2(n) { return n == null || isNaN(n) ? null : Math.round(n * 100) / 100; }
+/* A daily count is per SKU: a batch the counter did not find in a counted SKU counts as 0 (same rule as the server's sku_var). */
+function skuCounted(l) { return l.flag !== "NOT COUNTED" && l.flag !== "PENDING"; }
+export function lineVals(l) {
+  if (!skuCounted(l)) return { counted: false, phys: null, v: null, vv: null };
+  var ph = l.status === "NOT COUNTED" ? 0 : Number(l.phys) || 0, v = ph - (Number(l.sys) || 0);
+  return { counted: true, found: l.status !== "NOT COUNTED", phys: ph, v: v, vv: l.cost == null ? null : v * Number(l.cost) };
+}
+/* one row per SKU from the batch lines of a daily count */
+export function dailySkus(t) {
+  var by = {}, order = [];
+  (t.lines || []).forEach(function (l) {
+    var g = by[l.code]; if (!g) { g = by[l.code] = { code: l.code, desc: l.desc || "", cls: (t.plan || {})[l.code] || "", sys: 0, phys: 0, v: null, vv: null, flag: l.flag, pct: l.pct == null ? null : Number(l.pct) * 100, counted: skuCounted(l), cost: l.cost }; order.push(l.code); }
+    var x = lineVals(l); g.sys += Number(l.sys) || 0;
+    if (x.counted) { g.phys += x.phys; g.v = (g.v || 0) + x.v; if (x.vv != null) g.vv = (g.vv || 0) + x.vv; }
+  });
+  return order.map(function (k) { return by[k]; });
+}
+/* totals of one daily count */
+export function dailyTotals(t) {
+  var sk = dailySkus(t), o = { listed: t.listed || 0, counted: 0, ok: 0, within: 0, over: 0, nis: 0, notCounted: 0, sysRm: 0, net: 0, abs: 0 };
+  sk.forEach(function (g) {
+    if (g.flag === "OK") o.ok++; else if (g.flag === "WITHIN") o.within++; else if (g.flag === "OVER") o.over++; else if (g.flag === "NOT IN SYSTEM") o.nis++; else o.notCounted++;
+    if (g.counted) { o.counted++; o.sysRm += g.sys * (g.cost || 0); o.net += g.vv || 0; o.abs += Math.abs(g.vv || 0); }
+  });
+  o.acc = o.counted ? Math.round((o.ok + o.within) / o.counted * 1000) / 10 : null;
+  return o;
+}
+function dayState(t) { if (!t) return ""; if (t.skipReason) return "skip"; if (t.submittedAt) return t.late ? "late" : "ontime"; return null; }
+
+/* Excel: Summary (warehouse x working day), Detail (every SKU batch), Repeat variance, Notes */
+export async function exportDailyReport(from, to, only) {
+  openModal(function (sh) { sh.append(el("h3", { text: "Preparing daily report…" }), el("p", { class: "muted", text: dayTxt(from) + " to " + dayTxt(to) })); });
+  var R, ST;
+  try {
+    var res = await Promise.all([rpc("admin_dcc_report", { p_token: S.admin.token, p_from: from, p_to: to }), rpc("admin_dcc_stats", { p_token: S.admin.token, p_from: from, p_to: to }), xlsxLib()]);
+    R = res[0]; ST = res[1];
+  } catch (e) { return fail(e); }
+  var inSet = function (b) { return !only || only.indexOf(b) >= 0; }, tol = Number(R.tolerance) || 2, by = {};
+  (R.takes || []).forEach(function (t) { by[t.branch + "|" + t.date] = t; });
+  var sum = [["Date", "Warehouse", "Region", "NOM", "Status", "Count window", "MB52 stock date", "Started", "Submitted", "Minutes", "Counted by",
+    "SKUs on list", "SKUs counted", "OK", "Within " + tol + "%", "Over " + tol + "%", "Not in system", "Not counted", "Accuracy %", "System value counted (RM)", "Net variance (RM)", "Absolute variance (RM)", "Photos", "Skip reason / note"]];
+  var meta = {}; (R.takes || []).forEach(function (t) { meta[t.branch] = t; });
+  (ST.branches || []).filter(function (b) { return inSet(b.branch); }).forEach(function (b) {
+    (b.cells || []).forEach(function (c) {
+      if (c.st === "future") return;
+      var t = by[b.branch + "|" + c.d], m = t || meta[b.branch] || {}, o = t ? dailyTotals(t) : null, st = dayState(t) || c.st;
+      var mins = t && t.startedAt && t.submittedAt ? Math.round((new Date(t.submittedAt) - new Date(t.startedAt)) / 60000) : null;
+      sum.push([c.d, b.branch, m.region || "", m.nom || "", DAYST[st] || st, t ? t.from + "-" + t.to : "", t && t.snapDate || "", hm(t && t.startedAt), hm(t && t.submittedAt), mins, t && t.who || "",
+        o ? o.listed : null, o ? o.counted : null, o ? o.ok : null, o ? o.within : null, o ? o.over : null, o ? o.nis : null, o ? o.notCounted : null, o ? o.acc : null,
+        o ? r2(o.sysRm) : null, o ? r2(o.net) : null, o ? r2(o.abs) : null, t ? t.photos : null, (t && t.skipReason) || c.why || ""]);
+    });
+  });
+  var det = [["Date", "Warehouse", "Item", "Description", "Class", "Batch", "System PCS", "Counted PCS", "Var PCS", "Var RM", "Unit cost (RM)", "SKU var %", "SKU result", "Counted by"]], rep = {};
+  (R.takes || []).filter(function (t) { return inSet(t.branch); }).forEach(function (t) {
+    (t.lines || []).forEach(function (l) {
+      var x = lineVals(l);
+      det.push([t.date, t.branch, l.code, l.desc || "", CLS[(t.plan || {})[l.code]] || (t.plan || {})[l.code] || "", l.batch ? bLabel(l.batch) : "", Number(l.sys) || 0, x.counted ? x.phys : null,
+        x.counted ? x.v : null, x.counted ? r2(x.vv) : null, r2(l.cost), l.pct == null ? null : Math.round(Number(l.pct) * 10000) / 100, l.flag, x.counted ? (x.found ? (t.who || "") : "batch not found") : ""]);
+    });
+    dailySkus(t).forEach(function (g) {
+      var k = t.branch + "|" + g.code, x = rep[k] || (rep[k] = { b: t.branch, c: g.code, d: g.desc, n: 0, times: 0, net: 0, abs: 0, last: "" });
+      if (!g.counted) return;
+      x.n++; if (g.flag === "OVER" || g.flag === "NOT IN SYSTEM") { x.times++; x.last = t.date > x.last ? t.date : x.last; } x.net += g.v || 0; x.abs += Math.abs(g.vv || 0);
+    });
+  });
+  var rp = [["Warehouse", "Item", "Description", "Times counted", "Times out of tolerance", "Net var PCS", "Absolute var RM", "Last out of tolerance"]];
+  Object.keys(rep).map(function (k) { return rep[k]; }).filter(function (x) { return x.times >= 2; }).sort(function (a, b) { return b.times - a.times || b.abs - a.abs; })
+    .forEach(function (x) { rp.push([x.b, x.c, x.d, x.n, x.times, r2(x.net), r2(x.abs), x.last]); });
+  if (rp.length === 1) rp.push(["No SKU was out of tolerance twice in this period."]);
+  var notes = [["NDD Stock Count - Daily cycle count report"], ["Period", from + " to " + to], ["Warehouses", only ? only.join(", ") : "All"], ["Generated", kl(nowIso())], ["Tolerance", "±" + tol + "% per SKU"], [],
+    ["Status", "On time = submitted inside the count window; Late = after the window end; Missed = working day with nothing submitted; Skipped = supervisor gave a reason; Off day / Nothing due = no count planned."],
+    ["Accuracy %", "SKUs exact or within tolerance, out of SKUs counted."], ["Class", "A = top 80% of stock value, B = next 15%, C = the rest, R = recount of yesterday's out-of-tolerance SKU, S = added by the supervisor."],
+    ["System stock", "SAP MB52 good stock of the stock date shown (bad-stock locations, blocked stock and transit left out)."], ["Var", "Counted minus system. Daily counts are per SKU: a batch in the system that the counter did not find counts as 0 (Detail: 'batch not found'). Var RM uses the MB52 unit value; empty when the MB52 had no values."]];
+  var wb = XLSX.utils.book_new(), add = function (name, aoa, widths) { var ws = XLSX.utils.aoa_to_sheet(aoa); ws["!cols"] = widths.map(function (w) { return { wch: w }; }); if (aoa.length > 1 && aoa[0].length > 1) ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: aoa[0].length - 1 } }) }; XLSX.utils.book_append_sheet(wb, ws, name); };
+  add("Summary", sum, [11, 18, 10, 14, 11, 12, 12, 8, 9, 8, 22, 9, 9, 6, 9, 9, 9, 9, 9, 14, 12, 12, 7, 26]);
+  add("Detail", det, [11, 18, 10, 34, 9, 9, 10, 10, 9, 10, 10, 9, 12, 22]);
+  add("Repeat variance", rp, [18, 10, 34, 10, 12, 10, 12, 14]);
+  add("Notes", notes, [16, 110]);
+  var buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }), fname = "DCC_Report_" + from + "_to_" + to + (only && only.length === 1 ? "_" + only[0].replace(/\s+/g, "_") : "") + ".xlsx";
+  window.__xlsx = { sheets: wb.SheetNames, summary: sum, detail: det.length, repeat: rp };
+  saveBlob(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), fname);
+  openModal(function (sh) { sh.append(el("h3", { text: "Exported ✓" }), el("p", { class: "muted", text: fname + " - " + (sum.length - 1) + " warehouse-days, " + (det.length - 1) + " SKU lines." }), el("button", { class: "btn block", text: "OK", onclick: closeModal })); });
+}
+
+/* Daily sign-off PDF: one warehouse, one day */
+export async function dailyPdf(branch, date) {
+  openModal(function (sh) { sh.append(el("h3", { text: "Preparing daily sign-off PDF…" }), el("p", { class: "muted", text: branch + " · " + dayTxt(date) })); });
+  var J, t, ses;
+  try {
+    var rr = await rpc("admin_dcc_report", { p_token: S.admin.token, p_from: date, p_to: date, p_branch: branch });
+    t = (rr.takes || [])[0]; if (!t) throw new Error("No daily count for " + branch + " on " + dayTxt(date) + ".");
+    var res = await Promise.all([rpc("admin_load", { p_token: S.admin.token, p_take: t.id }), pdfLibs()]);
+    ses = docsFrom(res[0].sessions).filter(function (x) { return x.branch === branch; }); J = res[1]; t.tol = Number(rr.tolerance) || 2;
+  } catch (e) { return fail(e); }
+  var tol = t.tol, sk = dailySkus(t), o = dailyTotals(t), F = function (n) { return n == null ? "" : fmt(n); }, R = function (n) { return n == null ? "" : fmt(n, 2); };
+  var d = new J({ unit: "mm", format: "a4" }), W = 210, y;
+  var logo = await logoData(), lx = 14;
+  if (logo) { try { d.addImage(logo, "PNG", 14, 8, 19.5, 12); lx = 37; } catch (e) { } }
+  d.setFont("helvetica", "bold"); d.setFontSize(14); d.text("Nabati Food Malaysia", lx, 14.5);
+  d.setFont("helvetica", "normal"); d.setFontSize(8.5); d.setTextColor(110); d.text("Daily cycle count sign-off", lx, 19); d.setTextColor(0);
+  d.setDrawColor(181, 18, 27); d.setLineWidth(0.6); d.line(14, 23, W - 14, 23); d.setLineWidth(0.2); d.setDrawColor(0); y = 31;
+  d.setFont("helvetica", "bold"); d.setFontSize(15); d.text(branch + " - Daily Cycle Count", 14, y); y += 7;
+  d.setFontSize(12); d.text(dayTxt(date), 14, y); d.setFont("helvetica", "normal"); d.setFontSize(9); d.text("Generated: " + kl(nowIso()), W - 14, y, { align: "right" }); y += 6;
+  var status = t.skipReason ? "Skipped - " + t.skipReason : t.submittedAt ? (t.late ? "Submitted LATE" : "Submitted on time") + " at " + hm(t.submittedAt) : "NOT SUBMITTED";
+  if (!t.submittedAt) { d.setTextColor(200, 0, 0); d.setFont("helvetica", "bold"); d.text("DRAFT - " + (t.skipReason ? "the supervisor skipped this day: " + t.skipReason : "this count was not submitted."), 14, y); d.setTextColor(0); d.setFont("helvetica", "normal"); y += 5; }
+  var mins = t.startedAt && t.submittedAt ? Math.round((new Date(t.submittedAt) - new Date(t.startedAt)) / 60000) : null;
+  d.autoTable({ startY: y, theme: "plain", styles: { fontSize: 9, cellPadding: 0.8 }, columnStyles: { 0: { fontStyle: "bold", cellWidth: 38 } }, margin: { left: 14, right: 14 },
+    body: [["Status", status], ["Count window", t.from + " - " + t.to + (t.region || t.nom ? "     Region: " + (t.region || "-") + "   NOM: " + (t.nom || "-") : "")],
+      ["Counted by", (t.who || "-") + (t.startedAt ? "   ·   started " + hm(t.startedAt) + (mins != null ? ", took " + mins + " min" : "") : "")],
+      ["System stock", "SAP MB52 good stock of " + (t.snapDate ? dayTxt(t.snapDate) : "-") + " (bad-stock locations, blocked stock and transit left out). Quantities in PCS. Tolerance ±" + tol + "% per SKU."]] });
+  y = d.lastAutoTable.finalY + 4;
+  var cc = {}; Object.keys(t.plan || {}).forEach(function (k) { var c = t.plan[k]; cc[c] = (cc[c] || 0) + 1; });
+  d.autoTable({ startY: y, theme: "grid", styles: { fontSize: 9, cellPadding: 1.6 }, headStyles: { fillColor: [60, 60, 60] }, head: [["Summary", "Value"]], margin: { left: 14, right: 14 }, columnStyles: { 1: { halign: "right", cellWidth: 55 } },
+    body: [["SKUs on today's list" + (Object.keys(cc).length ? " (" + ["A", "B", "C", "R", "S"].filter(function (k) { return cc[k]; }).map(function (k) { return k + " " + cc[k]; }).join(", ") + ")" : ""), F(o.listed)],
+      ["SKUs counted", F(o.counted)], ["SKUs OK / within " + tol + "%", F(o.ok + o.within)], ["SKUs over " + tol + "% (recounted next working day)", F(o.over)], ["SKUs not in system (found, no SAP stock)", F(o.nis)], ["SKUs not counted", F(o.notCounted)],
+      ["Accuracy (OK + within, of counted)", o.acc == null ? "-" : o.acc.toFixed(1) + "%"], ["System value of counted SKUs (RM)", R(o.sysRm)], ["Net variance (RM)", R(o.net)], ["Absolute variance (RM)", R(o.abs)], ["Warehouse photos", F(t.photos)]] });
+  y = d.lastAutoTable.finalY + 7;
+  var head = [["Item", "Description", "Class", "System", "Counted", "Var", "Var %", "Var RM", "Result"]];
+  var rowOf = function (g) { return [g.code, g.desc, g.cls, F(g.sys), g.counted ? F(g.phys) : "-", g.counted ? F(g.v) : "-", g.pct == null ? "" : fmt(g.pct, 1) + "%", g.counted ? R(g.vv) : "", g.flag === "WITHIN" ? "WITHIN " + tol + "%" : g.flag === "OVER" ? "OVER " + tol + "%" : g.flag]; };
+  var cs = { 0: { cellWidth: 14 }, 1: { cellWidth: 60 }, 2: { cellWidth: 11 }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" }, 7: { halign: "right" } };
+  var paint = function (h) { if (h.section !== "body") return; var v = h.row.raw[8] || ""; if (/^OVER|NOT IN SYSTEM|NOT COUNTED/.test(v)) h.cell.styles.textColor = [180, 0, 0]; };
+  var ex = sk.filter(function (g) { return g.flag !== "OK" && g.flag !== "WITHIN"; });
+  d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Exceptions (" + ex.length + " SKU" + (ex.length === 1 ? "" : "s") + ")", 14, y); d.setFont("helvetica", "normal");
+  d.autoTable({ startY: y + 2, theme: "grid", styles: { fontSize: 7.5, cellPadding: 1.2 }, headStyles: { fillColor: [60, 60, 60] }, head: head, body: ex.length ? ex.map(rowOf) : [["", "No exceptions - every SKU counted is within tolerance.", "", "", "", "", "", "", ""]], columnStyles: cs, margin: { left: 14, right: 14 }, didParseCell: paint });
+  y = d.lastAutoTable.finalY + 7;
+  if (y > 230) { d.addPage(); y = 18; }
+  d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("All SKUs on today's list (" + sk.length + ")", 14, y); d.setFont("helvetica", "normal");
+  d.autoTable({ startY: y + 2, theme: "grid", styles: { fontSize: 7.5, cellPadding: 1.2 }, headStyles: { fillColor: [60, 60, 60] }, head: head, body: sk.map(rowOf), columnStyles: cs, margin: { left: 14, right: 14 }, didParseCell: paint });
+  y = d.lastAutoTable.finalY + 8;
+  if (y > 205) { d.addPage(); y = 18; }
+  d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Declaration", 14, y); y += 5; d.setFont("helvetica", "normal"); d.setFontSize(9);
+  d.text("I confirm the quantities above were physically counted at " + branch + " on " + dayTxt(date) + ", without reference to the system quantity.", 14, y, { maxWidth: W - 28 }); y += 10;
+  var box = function (role, name, img, at) {
+    if (y > 262) { d.addPage(); y = 18; } d.setDrawColor(150); d.rect(14, y, W - 28, 24); d.setFontSize(8); d.setTextColor(90); d.text(role, 16, y + 4); d.setTextColor(0); d.setFontSize(10); d.text(name || "Name:", 16, y + 11);
+    d.setFontSize(8); d.text(at ? "Signed in app: " + kl(at) : "Date:", 16, y + 19); if (img) { try { d.addImage(img, "JPEG", W - 14 - 62, y + 2, 60, 18); } catch (e) { } } else { d.line(W - 14 - 62, y + 19, W - 16, y + 19); d.text("Signature", W - 14 - 62, y + 22); } y += 27;
+  };
+  var signed = 0;
+  ses.filter(function (x) { return x.status === "submitted"; }).forEach(function (x) { ((x.names && x.names.length) ? x.names : [x.member]).forEach(function (n) { var s = (x.sign || {})[n]; box("Counted by", n, s && s.img, s && s.at); signed++; }); });
+  if (!signed) box("Counted by", "", "", "");
+  box("Checked by - Warehouse supervisor", "", "", "");
+  var pics = await sessionPhotos(ses); if (pics.length || pics.miss) photoPages(d, W, pics, true);
+  var cnt = (t.lines || []).filter(function (l) { return lineVals(l).counted; });
+  if (cnt.length) {
+    d.addPage(); d.setFont("helvetica", "bold"); d.setFontSize(11); d.text("Appendix - counted SKUs by batch (" + cnt.length + " line" + (cnt.length === 1 ? "" : "s") + ")", 14, 16); d.setFont("helvetica", "normal");
+    d.setFontSize(8); d.setTextColor(90); d.text("A batch in the system that was not found counts as 0.", 14, 20); d.setTextColor(0);
+    d.autoTable({ startY: 22, theme: "grid", styles: { fontSize: 7, cellPadding: 1.2 }, headStyles: { fillColor: [60, 60, 60] }, head: [["Item", "Description", "Batch", "System", "Counted", "Var", "Var RM", "Note"]],
+      body: cnt.map(function (l) { var x = lineVals(l); return [l.code, l.desc || "", l.batch ? bLabel(l.batch) : "", F(l.sys), F(x.phys), F(x.v), R(x.vv), x.found ? "" : "not found"]; }), columnStyles: { 0: { cellWidth: 14 }, 1: { cellWidth: 62 }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" } }, margin: { left: 14, right: 14 } });
+  }
+  var n = d.getNumberOfPages(); for (var i = 1; i <= n; i++) { d.setPage(i); d.setFontSize(7); d.setTextColor(120); d.text(branch + " · " + date + " - page " + i + " of " + n, W - 14, 290, { align: "right" }); d.setTextColor(0); }
+  var fname = "DCC_SignOff_" + branch.replace(/\s+/g, "_") + "_" + date + ".pdf";
+  window.__pdf = d.output("datauristring");
+  saveBlob(d.output("blob"), fname);
+  openModal(function (sh) { sh.append(el("h3", { text: "Saved ✓" }), el("p", { class: "muted", text: fname + (t.submittedAt ? "" : " (marked DRAFT)") }), el("button", { class: "btn block", text: "OK", onclick: closeModal })); });
 }
