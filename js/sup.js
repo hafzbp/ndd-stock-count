@@ -70,6 +70,7 @@ export function renderSup(app) {
       el("button", { class: "btn", text: "↻", title: "Refresh", onclick: function () { load(D.date); } }))));
 
   if (!isToday) app.append(el("div", { class: "banner warn row", style: "justify-content:space-between" }, el("span", { text: "Past day (read-only)" }), el("button", { class: "btn", text: "Back to today", onclick: function () { load(); } })));
+  else app.append(guide(D, s));
 
   if (!ti) {
     app.append(el("div", { class: "card center" }, el("h2", { text: D.monthlyOpen ? "Monthly stock take is open" : "Nothing to count" }),
@@ -144,4 +145,35 @@ function skipDay(D) {
           catch (e) { err.textContent = errText(e); }
         } })));
   });
+}
+
+/* "What to do today": one card that tells the supervisor the next step for today's status. */
+function guide(D, s) {
+  var ti = D.takeInfo, w = D.window || {}, link = location.origin + location.pathname.replace(/index\.html$/, "");
+  var c = el("div", { class: "card guide" }, el("h3", { text: "What to do today" }));
+  function steps(list) { c.append(el("ol", { class: "steps-ol" }, list.map(function (x) { return el("li", {}, x); }))); }
+  if (!ti) {
+    c.append(el("p", { text: D.monthlyOpen ? "The monthly stock take is open, so there is no daily count today. Your team counts the monthly stock take instead." :
+      "Nothing to count today (off day, nothing due, or HQ hasn't uploaded today's stock yet). Nothing for you to do." }));
+  } else if (ti.skipReason) {
+    c.append(el("p", { text: "Today's count was skipped: " + ti.skipReason + ". The SKUs move to the next working days." }));
+  } else if (s.t === "On time" || s.t === "Late") {
+    steps(["Done for today ✓ - submitted" + (s.t === "Late" ? " (after " + (w.to || "the window") + ", so it shows as late)" : "") + ".",
+      "Look at SKUs marked OVER in the list below: they are counted again tomorrow automatically.",
+      "Nothing else to do."]);
+  } else {
+    var n = ti.skuCount, msgTxt = "Today's cycle count - " + D.branch + ": " + n + " SKU(s).\nOpen " + link + " , enter plant code " + (w.plant || "") + " and count the list" + (w.to ? " before " + w.to : "") + ", then submit.";
+    steps([
+      el("span", {}, "Send the counter today's task: ", el("button", { class: "link", text: "copy message", onclick: function () { copy(msgTxt); } }), " or ", el("a", { href: "https://wa.me/?text=" + encodeURIComponent(msgTxt), target: "_blank", rel: "noopener", text: "send on WhatsApp" }), "."),
+      "The counter opens the app on their phone, enters plant code " + (w.plant || "") + " and counts the " + n + " SKU(s) below" + (w.to ? ", before " + w.to : "") + ".",
+      "Come back here after they submit to check the result. You can watch progress live (↻).",
+      "Can't count today? Use “Skip today” with a reason. Need an extra SKU checked? Use “+ Add SKU to today”."]);
+    if (s.t === "Counting") c.append(el("p", { class: "small", style: "margin:8px 0 0", text: "Counting has started - waiting for the counter to submit." }));
+  }
+  c.append(el("p", { class: "small muted", style: "margin:10px 0 0", text: "You don't start counts yourself: the daily list is made automatically every working day from HQ's stock upload (most valuable SKUs more often), and HQ starts the monthly full stock take." }));
+  return c;
+}
+function copy(t) {
+  try { navigator.clipboard.writeText(t).then(function () { toast("Message copied"); }, function () { msg("Message for the counter", t); }); }
+  catch (e) { msg("Message for the counter", t); }
 }

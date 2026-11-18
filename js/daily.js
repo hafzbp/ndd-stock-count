@@ -35,9 +35,9 @@ export function renderDaily(app) {
   /* day overview */
   var rows = D.rows || [], st = rows.map(function (r) { return dayStatus(r, d, today); });
   var cnt = {}; st.forEach(function (x) { var k = x.t.split(" · ")[0]; cnt[k] = (cnt[k] || 0) + 1; });
-  var nav = el("div", { class: "row" },
+  var nav = el("div", { class: "row", style: "flex-wrap:nowrap;gap:6px" },
     el("button", { class: "btn", text: "‹", title: "Previous day", onclick: function () { S.dccDate = addDays(d, -1); S.dcc = null; hooks.render(); } }),
-    el("input", { type: "date", value: d, max: today, style: "max-width:170px", onchange: function (e) { if (e.target.value) { S.dccDate = e.target.value; S.dcc = null; hooks.render(); } } }),
+    el("input", { type: "date", value: d, max: today, style: "width:160px", onchange: function (e) { if (e.target.value) { S.dccDate = e.target.value; S.dcc = null; hooks.render(); } } }),
     el("button", { class: "btn", text: "›", title: "Next day", disabled: d >= today, onclick: function () { S.dccDate = addDays(d, 1); S.dcc = null; hooks.render(); } }),
     d !== today ? el("button", { class: "btn", text: "Today", onclick: function () { S.dccDate = today; S.dcc = null; hooks.render(); } }) : null,
     el("button", { class: "btn", text: "↻", title: "Refresh", onclick: function () { S.dcc = null; hooks.render(); } }));

@@ -291,9 +291,9 @@ function dccCard(A, st) {
   (A.branches || []).filter(function (b) { return b.active; }).forEach(function (b) {
     var days = {}; (b.workDays || []).forEach(function (d) { days[d] = 1; });
     var chips = el("div", { class: "row", style: "gap:3px;flex-wrap:nowrap" }, WD.map(function (w) {
-      var x = el("button", { class: "chip" + (days[w[0]] ? " on" : ""), text: w[1].slice(0, 2), title: w[1], onclick: function () { if (days[w[0]]) delete days[w[0]]; else days[w[0]] = 1; x.classList.toggle("on"); } }); return x;
+      var x = el("button", { class: "wd" + (days[w[0]] ? " on" : ""), text: w[1].slice(0, 2), title: w[1], onclick: function () { if (days[w[0]]) delete days[w[0]]; else days[w[0]] = 1; x.classList.toggle("on"); } }); return x;
     }));
-    var f = el("input", { type: "time", value: b.from || "07:00", style: "width:105px" }), to = el("input", { type: "time", value: b.to || "10:00", style: "width:105px" });
+    var f = el("input", { type: "time", value: b.from || "07:00", style: "width:138px" }), to = el("input", { type: "time", value: b.to || "10:00", style: "width:138px" });
     t.append(el("tr", {}, el("td", { text: b.name }), el("td", {}, chips), el("td", {}, el("div", { class: "row", style: "gap:4px;flex-wrap:nowrap" }, f, el("span", { text: "-" }), to)),
       el("td", {}, el("span", { class: "pill " + (b.supPin ? (b.supMustChange ? "warn" : "ok") : ""), text: b.supPin ? (b.supMustChange ? "Not changed yet" : "Set") : "No PIN" }),
         el("button", { class: "link", style: "margin-left:6px", text: b.supPin ? "Reset" : "Create", onclick: function () {
