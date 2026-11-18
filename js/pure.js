@@ -52,11 +52,11 @@ export function parseMB52(rows, branches, plantMap) {
   if (c.batch < 0) throw new Error('Missing column "Batch".');
   if (!mb52 && c.pcs < 0) throw new Error('Missing a quantity column: "Unrestricted" (SAP MB52) or "Total in PCS" (stock report).');
   function v(row, k) { return c[k] >= 0 ? row[c[k]] : ""; }
-  /* GOOD stock only: Blocked Stock column and bad-stock locations (BS*, SH*, "Bad"/"Dmg") are excluded */
+  /* byBr = GOOD stock; byBrBad = bad-stock locations (BS*, SH*, "Bad"/"Dmg"). The Blocked Stock column is left out of both. */
   var exQ = 0, exV = 0, exB = 0, exBV = 0, trV = 0;
   function badLoc(sl, ds) { return /^(BS|SH)/i.test(sl) || /bad|dmg|damage|shtg/i.test(ds); }
   var brMap = canon(branches);
-  var agg = {}, descs = {}, skipped = {}, bad = {}, transit = 0, n = 0, plants = {};
+  var agg = {}, aggB = {}, descs = {}, skipped = {}, bad = {}, transit = 0, n = 0, plants = {};
   for (var r = hr + 1; r < rows.length; r++) {
     var row = rows[r];
     var plant = String(v(row, "plant") || "").trim().replace(/\.0$/, ""), mat = String(v(row, "material") || "").trim().replace(/\.0$/, ""); if (!plant || !mat) continue;
@@ -66,21 +66,27 @@ export function parseMB52(rows, branches, plantMap) {
     var q = mb52 ? numv(v(row, "unr")) + numv(v(row, "rst")) + numv(v(row, "qi")) : numv(v(row, "pcs"));
     var val = numv(v(row, "vUnr")) + numv(v(row, "vRst")) + numv(v(row, "vQi"));
     exB += numv(v(row, "blk")); exBV += numv(v(row, "vBlk"));
-    var slc = String(v(row, "sloc") || "").trim(), sld = String(v(row, "slocDesc") || "");
-    if (badLoc(slc, sld)) { exQ += q; exV += val; continue; }
+    var slc = String(v(row, "sloc") || "").trim(), sld = String(v(row, "slocDesc") || ""), isBad = badLoc(slc, sld);
+    if (isBad) { exQ += q; exV += val; }
     if (!q) continue;
-    if (!byPlant && !brMap[normH(raw)]) { var k0 = plant + (raw ? " " + raw : ""); skipped[k0] = (skipped[k0] || 0) + val; continue; }
+    if (!byPlant && !brMap[normH(raw)]) { if (!isBad) { var k0 = plant + (raw ? " " + raw : ""); skipped[k0] = (skipped[k0] || 0) + val; } continue; }
     (plants[name] = plants[name] || {})[plant] = 1;
     var b = monthOf(normBatch(v(row, "batch"))); if (b && !isMonthB(b)) bad[b] = 1;
-    var key = name + "|" + mat + "|" + b, A = agg[key] || (agg[key] = { br: name, code: mat, b: b, q: 0, v: 0, sl: {} });
-    A.q += q; A.v += val; n++; if (slc) A.sl[slc] = 1;
+    var G = isBad ? aggB : agg, key = name + "|" + mat + "|" + b, A = G[key] || (G[key] = { br: name, code: mat, b: b, q: 0, v: 0, sl: {} });
+    A.q += q; A.v += val; if (!isBad) n++; if (slc) A.sl[slc] = 1;
   }
-  var byBr = {}; Object.keys(agg).forEach(function (k) { var A = agg[k]; (byBr[A.br] = byBr[A.br] || []).push([A.code, A.b, Math.round(A.q * 1000) / 1000, A.q ? Math.round(A.v / A.q * 1e6) / 1e6 : 0, Object.keys(A.sl).sort().join(",")]); });
-  Object.keys(byBr).forEach(function (b) { byBr[b].sort(function (x, y) { return (x[0] + x[1]).localeCompare(y[0] + y[1]); }); });
+  function group(G) {
+    var out = {}; Object.keys(G).forEach(function (k) { var A = G[k]; (out[A.br] = out[A.br] || []).push([A.code, A.b, Math.round(A.q * 1000) / 1000, A.q ? Math.round(A.v / A.q * 1e6) / 1e6 : 0, Object.keys(A.sl).sort().join(",")]); });
+    Object.keys(out).forEach(function (b) { out[b].sort(function (x, y) { return (x[0] + x[1]).localeCompare(y[0] + y[1]); }); });
+    return out;
+  }
+  var byBr = group(agg), byBrBad = group(aggB);
   var totQ = 0, totV = 0; Object.keys(agg).forEach(function (k) { totQ += agg[k].q; totV += agg[k].v; });
+  var badQ = 0, badV = 0; Object.keys(aggB).forEach(function (k) { badQ += aggB[k].q; badV += aggB[k].v; });
   var pl = {}; Object.keys(plants).forEach(function (b) { pl[b] = Object.keys(plants[b]).sort(); });
   return { format: mb52 ? "mb52" : "report", hasValue: c.vUnr >= 0, trV: trV, exBadQ: exQ, exBadV: exV, exBlkQ: exB, exBlkV: exBV, byBr: byBr, descs: descs, skipped: skipped, plants: pl,
-    badBatches: Object.keys(bad), transit: transit, rowsUsed: n, lines: Object.keys(agg).length, totQ: totQ, totV: totV };
+    badBatches: Object.keys(bad), transit: transit, rowsUsed: n, lines: Object.keys(agg).length, totQ: totQ, totV: totV,
+    byBrBad: byBrBad, badLines: Object.keys(aggB).length, badQ: badQ, badV: badV };
 }
 
 /** Distinct branch names (Name 1 / PLANT DISCRIPTION) in the file with their plant, matched to known branches ignoring case. */

@@ -20,7 +20,7 @@ function stateTag(s) { return el("span", { class: "state " + s, text: s === "ope
 
 export function waMessage() {
   var t = info(), c = S.cfg || {}, rule = (c.photoRoles || []).length ? "\nBefore you submit: take " + (c.photoMin || 3) + "-" + (c.photoMax || 5) + " photos of the warehouse." : "";
-  return "Stock take: " + (t.name || "") + (t.scope === "partial" ? " (partial, " + t.skuCount + " SKUs)" : "") +
+  return "Stock take: " + (t.name || "") + (t.stockType === "bad" ? " - BAD STOCK only (locations BS00, BS01, SH00)" : "") + (t.scope === "partial" ? " (partial, " + t.skuCount + " SKUs)" : "") +
     "\n1. Open this link in Chrome or Safari (not inside WhatsApp): " + appUrl() +
     "\n2. Enter your warehouse plant code (for example 1508)" +
     (single(t) ? "\n3. Type your name, start counting" : "\n3. Pick your team, type your name, start counting") + rule;
@@ -75,10 +75,10 @@ function renderWizard(app, t) {
   var fresh = S.wizNew;
   var W = S.wiz && S.wiz.id === (fresh ? "new" : t.id) ? S.wiz : (S.wiz = {
     id: fresh ? "new" : t.id, step: 1,
-    name: fresh ? "" : t.name, scope: fresh ? "total" : (t.scope || "total"), mode: fresh ? "double" : (t.mode || "double"), skus: fresh ? {} : (t.skus || []).reduce(function (o, c) { o[c] = 1; return o; }, {})
+    name: fresh ? "" : t.name, scope: fresh ? "total" : (t.scope || "total"), mode: fresh ? "double" : (t.mode || "double"), stype: fresh ? "good" : (t.stockType || "good"), skus: fresh ? {} : (t.skus || []).reduce(function (o, c) { o[c] = 1; return o; }, {})
   });
   var hasSys = !fresh && Object.keys(S.sysBy || {}).length > 0, partial = W.scope === "partial", nSku = Object.keys(W.skus).length;
-  var steps = [[1, "Name and type", W.name ? (partial ? "Partial" : "Total") + " · " + (W.mode === "single" ? "Single" : "Double") : "Not set"], [2, "Pick SKUs", partial ? nSku + " picked" : "Not needed (Total)"], [3, "Upload MB52", hasSys ? Object.keys(S.sysBy).length + " warehouses" : "Not yet"], [4, "Open counting", "Review and open"]];
+  var steps = [[1, "Name and type", W.name ? (W.stype === "bad" ? "Bad stock · " : "Good stock · ") + (partial ? "Partial" : "Total") + " · " + (W.mode === "single" ? "Single" : "Double") : "Not set"], [2, "Pick SKUs", partial ? nSku + " picked" : "Not needed (Total)"], [3, "Upload MB52", hasSys ? Object.keys(S.sysBy).length + " warehouses" : "Not yet"], [4, "Open counting", "Review and open"]];
   app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: fresh ? "New stock take" : "Set up the stock take" }), stateTag("draft")));
   if (fresh) app.append(el("p", { class: "small muted", text: "The last stock take stays in History below." }));
   var bar = el("div", { class: "wiz" });
@@ -94,6 +94,7 @@ function renderWizard(app, t) {
       var skus = partial ? Object.keys(W.skus) : [];
       await rpc("admin_draft", { p_token: tok(), p_name: W.name, p_scope: W.scope, p_skus: skus });
       await rpc("admin_set_mode", { p_token: tok(), p_mode: W.mode });
+      await rpc("admin_set_stock_type", { p_token: tok(), p_type: W.stype });
       S.wizNew = false; await loadAdmin(); S.wiz = Object.assign(W, { id: info().id, step: next }); hooks.render(); window.scrollTo(0, 0);
     } catch (e) { msg("Can't save", errText(e)); }
   }
@@ -104,14 +105,25 @@ function renderWizard(app, t) {
     [["total", "Total", "Count every SKU in the MB52"], ["partial", "Partial", "Count only the SKUs you pick"]].forEach(function (o) {
       ch.append(el("button", { class: "choice" + (W.scope === o[0] ? " on" : ""), onclick: function () { W.scope = o[0]; hooks.render(); } }, el("b", { text: o[1] }), el("div", { class: "small muted", text: o[2] })));
     });
+    var stc = el("div", { class: "grid", style: "margin-top:6px" });
+    [["good", "Good stock", "Sellable stock in the normal locations (MW00, MW01). The usual stock take."], ["bad", "Bad stock", "Damaged, expired and short stock in the bad-stock locations BS00, BS01, SH00 only."]].forEach(function (o) {
+      stc.append(el("button", { class: "choice" + (W.stype === o[0] ? " on" : ""), onclick: function () { W.stype = o[0]; hooks.render(); } }, el("b", { text: o[1] }), el("div", { class: "small muted", text: o[2] })));
+    });
     var mc = el("div", { class: "grid", style: "margin-top:6px" });
     [["double", "Double count", "Ops and Finance count separately. A line is agreed only when both match. For full stock takes and audits."], ["single", "Single count", "One team counts. Its count is the agreed count. Faster, but no second check."]].forEach(function (o) {
       mc.append(el("button", { class: "choice" + (W.mode === o[0] ? " on" : ""), onclick: function () { W.mode = o[0]; hooks.render(); } }, el("b", { text: o[1] }), el("div", { class: "small muted", text: o[2] })));
     });
-    c.append(el("h3", { text: "1. Name and type" }), el("p", { class: "small muted", text: "Counters see this name. The type decides which SKUs they count." }), nm, ch,
+    c.append(el("h3", { text: "1. Name and type" }), el("p", { class: "small muted", text: "Counters see this name. The type decides which SKUs they count." }), nm,
+      el("p", { class: "small", style: "margin:14px 0 0;font-weight:600", text: "Which stock?" }), stc,
+      el("p", { class: "small", style: "margin:14px 0 0;font-weight:600", text: "Which SKUs?" }), ch,
       el("p", { class: "small", style: "margin:14px 0 0;font-weight:600", text: "How many teams count?" }), mc,
       el("div", { class: "row", style: "justify-content:flex-end;margin-top:14px" }, fresh ? el("button", { class: "btn", text: "Cancel", onclick: function () { S.wizNew = false; S.wiz = null; hooks.render(); } }) : null,
-        el("button", { class: "btn primary", text: "Save and continue", onclick: function () { W.name = nm.value.trim(); if (!W.name) { nm.focus(); return; } save(W.scope === "partial" ? 2 : 3); } })));
+        el("button", { class: "btn primary", text: "Save and continue", onclick: function () {
+          W.name = nm.value.trim(); if (!W.name) { nm.focus(); return; }
+          var go = function () { save(W.scope === "partial" ? 2 : 3); };
+          if (hasSys && W.stype !== (t.stockType || "good")) confirmBox("Change to " + (W.stype === "bad" ? "bad" : "good") + " stock?", "The MB52 already loaded is " + (W.stype === "bad" ? "good" : "bad") + " stock. It will be removed, and you upload the MB52 again in step 3.", "Change", go);
+          else go();
+        } })));
     return;
   }
   if (W.step === 2) {
@@ -150,6 +162,7 @@ function renderWizard(app, t) {
   c.append(el("h3", { text: "4. Review and open counting" }),
     el("div", { class: "stats", style: "margin-top:8px" },
       el("div", { class: "stat" }, el("b", { text: t.name }), el("span", { text: "Name" })),
+      el("div", { class: "stat" }, el("b", { class: t.stockType === "bad" ? "neg" : "", text: t.stockType === "bad" ? "Bad stock" : "Good stock" }), el("span", { text: t.stockType === "bad" ? "BS00, BS01, SH00 only" : "Normal locations" })),
       el("div", { class: "stat" }, el("b", { text: t.scope === "partial" ? "Partial" : "Total" }), el("span", { text: t.scope === "partial" ? t.skuCount + " SKUs picked" : "All SKUs in MB52" })),
       el("div", { class: "stat" }, el("b", { text: single(t) ? "Single" : "Double" }), el("span", { text: single(t) ? "One team counts" : "Ops + Finance must match" })),
       el("div", { class: "stat" }, el("b", { text: progressRows().length }), el("span", { text: "Warehouses with SKUs to count" })),
@@ -175,7 +188,7 @@ function readyTable() {
 /* ---------------- Open ---------------- */
 function renderOpen(app, t) {
   var sg = single(t), rows = progressRows(), done = function (r) { return sg ? r.all.st === "Submitted" : r.ops.st === "Submitted" && r.fin.st === "Submitted"; }, both = rows.filter(done).length;
-  app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: t.name }), stateTag("open")),
+  app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: t.name + (t.stockType === "bad" ? " · Bad stock" : "") }), stateTag("open")),
     el("p", { class: "small muted", text: typeTxt(t) + " · open since " + tsTxt(t.openedAt) + " · updates every 20 seconds" }),
     el("div", { class: "stats" },
       el("div", { class: "stat" }, el("b", { text: rows.length }), el("span", { text: "Warehouses" })),
@@ -207,7 +220,7 @@ function renderClosed(app, t) {
     tbl.append(el("tr", {}, el("td", { text: r.b }), el("td", { class: "n", text: m }), el("td", { class: "n" + (rc ? " neg" : ""), text: rc }), el("td", { class: "n" + (over ? " neg" : ""), text: over }), el("td", { class: "n " + (q < 0 ? "neg" : q > 0 ? "pos" : ""), text: fmt(q) }), el("td", { class: "n " + (v < 0 ? "neg" : v > 0 ? "pos" : ""), text: fmt(v, 2) })));
   });
   tbl.append(el("tr", { class: "tot" }, el("td", { text: "TOTAL" }), el("td", { class: "n", text: tot.m }), el("td", { class: "n", text: tot.r }), el("td", { class: "n", text: tot.o }), el("td", { class: "n", text: fmt(tot.q) }), el("td", { class: "n", text: fmt(tot.v, 2) })));
-  app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: t.name }), stateTag("closed")),
+  app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: t.name + (t.stockType === "bad" ? " · Bad stock" : "") }), stateTag("closed")),
     el("p", { class: "small muted", text: typeTxt(t) + " · closed " + tsTxt(t.closedAt) }),
     el("div", { class: "card" }, el("h3", { text: "Results" }), el("div", { class: "tw" }, tbl)),
     el("div", { class: "card" }, el("h3", { text: "Next" }),

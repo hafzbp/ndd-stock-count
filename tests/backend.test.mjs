@@ -50,7 +50,7 @@ const rows = [["junk"], H,
 function mb52Payload(branches) {
   const res = parseMB52(rows, branches), plants = {};
   rows.slice(2).forEach((r) => { if (res.byBr[r[1]]) { (plants[r[1]] = plants[r[1]] || []); if (!plants[r[1]].includes(r[0])) plants[r[1]].push(r[0]); } });
-  return { meta: { goodV: res.totV }, byBr: res.byBr, descs: res.descs, plants };
+  return { meta: { goodV: res.totV }, byBr: res.byBr, byBrBad: res.byBrBad, descs: res.descs, plants };
 }
 await t("first take is a draft; admin names it (Total)", async () => {
   const c = await rpc("public_config", {}); assert.equal(c.take.status, "draft");
@@ -64,6 +64,23 @@ await t("MB52 load: branches added, plant codes stored (1 branch can have 2 plan
   assert.deepEqual(a.branches.find((b) => b.name === "NDD Alpha").plants, ["1501"]);
   assert.deepEqual(a.branches.find((b) => b.name === "NDD Beta").plants.sort(), ["1502", "1509"]);
   assert.equal(a.sys["NDD Alpha"].length, 5);
+});
+await t("good or bad stock: parser keeps bad-stock locations apart; changing the kind in a draft clears the loaded MB52", async () => {
+  const res = parseMB52(rows, ["NDD Alpha", "NDD Beta"]);
+  assert.deepEqual(res.byBrBad, { "NDD Alpha": [["A1", "2027-03", 99, 1, "BS00"]] });
+  assert.ok(!res.byBr["NDD Alpha"].some((r) => r[4] === "BS00")); assert.equal(res.badLines, 1); assert.equal(res.badQ, 99);
+  let tk = (await rpc("admin_load", { p_token: ADM })).takeInfo; assert.equal(tk.stockType, "good");
+  await rejects(rpc("admin_set_stock_type", { p_token: ADM, p_type: "ugly" }), /good or bad/);
+  tk = await rpc("admin_set_stock_type", { p_token: ADM, p_type: "good" }); assert.equal(tk.stockType, "good");
+  assert.ok(Number((await db.query("select count(*) from public.sys_stock where take_id = $1", [tk.id])).rows[0].count) > 0, "same kind keeps the MB52");
+  tk = await rpc("admin_set_stock_type", { p_token: ADM, p_type: "bad" }); assert.equal(tk.stockType, "bad");
+  assert.equal(Number((await db.query("select count(*) from public.sys_stock where take_id = $1", [tk.id])).rows[0].count), 0);
+  assert.equal(Number((await db.query("select count(*) from public.mb52_meta where take_id = $1", [tk.id])).rows[0].count), 0);
+  await rpc("admin_load_mb52", { p_token: ADM, p_payload: { meta: { stockType: "bad" }, byBr: res.byBrBad, descs: res.descs, plants: {} } });
+  assert.deepEqual((await db.query("select code, qty::int as qty, sloc from public.sys_stock where take_id = $1", [tk.id])).rows, [{ code: "A1", qty: 99, sloc: "BS00" }]);
+  await rpc("admin_set_stock_type", { p_token: ADM, p_type: "good" });
+  await rpc("admin_load_mb52", { p_token: ADM, p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
+  assert.equal((await rpc("admin_load", { p_token: ADM })).takeInfo.stockType, "good");
 });
 await t("plant login: wrong code rejected; right code gives that branch", async () => {
   assert.equal((await rpc("plant_login", { p_code: "9999" })).ok, false);
@@ -81,6 +98,9 @@ await t("factors + barcodes", async () => {
 await t("open counting; can't start another stock take while open", async () => {
   const o = await rpc("admin_set_status", { p_token: ADM, p_status: "open" }); assert.equal(o.status, "open");
   await rejects(rpc("admin_draft", { p_token: ADM, p_name: "Another", p_scope: "total", p_skus: [] }), /close the current/);
+});
+await t("good or bad stock can't change once counting is open", async () => {
+  await rejects(rpc("admin_set_stock_type", { p_token: ADM, p_type: "bad" }), /before counting opens/);
 });
 await t("branch token can't open another branch; codes/batches without quantities", async () => {
   await rejects(rpc("counter_branch", { p_token: TB, p_branch: "NDD Alpha" }), /PIN/);
@@ -308,6 +328,8 @@ await t("no stock upload yet: nothing planned, counter told there's nothing to c
 });
 await t("daily stock upload; ABC by value per warehouse (A 80%, B next 15%, C rest)", async () => {
   const r = await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-17", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) }); assert.equal(r.branches, 2);
+  const kinds = (await db.query("select k.stype, k.code, k.qty::int as qty from public.snap_stock k join public.snapshots x on x.id = k.snap_id where x.snap_date = '2026-11-17' and k.branch = 'NDD Alpha' and k.stype = 'bad'")).rows;
+  assert.deepEqual(kinds, [{ stype: "bad", code: "A1", qty: 99 }], "daily upload keeps bad stock apart");
   await rejects(rpc("admin_load_daily", { p_token: A2, p_date: "2026-12-01", p_payload: mb52Payload(["NDD Alpha"]) }), /stock date/);
   await rpc("admin_dcc_day", { p_token: A2 });
   const a = await rpc("admin_abc", { p_token: A2, p_branch: "NDD Alpha" });

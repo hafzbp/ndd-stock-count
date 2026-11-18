@@ -13,7 +13,7 @@ export function roleName(r) { return singleMode() ? "Count" : r === "fin" ? "Fin
 /* Daily cycle count vs monthly stock take: one big coloured label so the counter always knows which one this is. */
 var WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function dayTxt(d) { if (!d) return ""; var x = new Date(d + "T00:00:00"); return isNaN(x) ? d : WD[x.getDay()] + " " + x.getDate() + " " + MN[x.getMonth()]; }
-export function kindShort() { return S.take && S.take.kind === "daily" ? "Daily count" : "Monthly stock take"; }
+export function kindShort() { return S.take && S.take.kind === "daily" ? "Daily count" : S.take && S.take.stockType === "bad" ? "Bad stock take" : "Monthly stock take"; }
 export function kindLabel(n) {
   var t = S.take || {};
   if (t.kind === "daily") {
@@ -21,9 +21,10 @@ export function kindLabel(n) {
     if (t.countTo) parts.push("finish by " + t.countTo);
     return el("div", { class: "kind kind-daily" }, el("b", { text: "DAILY CYCLE COUNT" }), el("span", { text: parts.join(" · ") }));
   }
-  var sub = [t.name || "Stock take", singleMode() ? "single count" : "Ops + Finance count separately"];
+  var bad = t.stockType === "bad", sub = [t.name || "Stock take", singleMode() ? "single count" : "Ops + Finance count separately"];
+  if (bad) sub.splice(1, 0, "only stock in the bad-stock locations BS00, BS01, SH00");
   if (t.scope === "partial") sub.push(n == null ? "only the SKUs on your list" : "only " + n + " SKU" + (n === 1 ? "" : "s") + " on your list");
-  return el("div", { class: "kind kind-monthly" }, el("b", { text: "MONTHLY STOCK TAKE" }), el("span", { text: sub.join(" · ") }));
+  return el("div", { class: "kind " + (bad ? "kind-bad" : "kind-monthly") }, el("b", { text: bad ? "MONTHLY STOCK TAKE · BAD STOCK" : "MONTHLY STOCK TAKE" }), el("span", { text: sub.join(" · ") }));
 }
 function roleOf(t) { return t.role || "Checker"; }
 

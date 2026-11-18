@@ -90,17 +90,18 @@ export function buildWorkbook() {
   su["A" + (t + 5)] = { t: "s", v: "Lines still RECOUNT or WAITING (must be 0 before sign-off)" }; su["B" + (t + 5)] = { t: "n", f: "D" + t + "+E" + t };
   su["L1"] = { t: "s", v: "Tolerance per SKU" }; su["M1"] = { t: "n", v: tolPct() / 100, z: "0.0%" };
   var me = S.adm && S.adm.meta, tr = t + 7, ref = "A1:M" + (t + 5), tkx = currentTake();
-  su["L2"] = { t: "s", v: "Stock take" }; su["M2"] = { t: "s", v: (tkx.name || "") + (tkx.scope === "partial" ? " (partial, " + tkx.skuCount + " SKUs)" : " (total)") + (tkx.mode === "single" ? ", single count" : ", double count") };
+  su["L2"] = { t: "s", v: "Stock take" }; su["M2"] = { t: "s", v: (tkx.name || "") + (tkx.stockType === "bad" ? " - BAD STOCK" : "") + (tkx.scope === "partial" ? " (partial, " + tkx.skuCount + " SKUs)" : " (total)") + (tkx.mode === "single" ? ", single count" : ", double count") };
   if (me && tkx.scope === "partial") { su["A" + tr] = { t: "s", v: "MB52 tie-out not applicable: partial count compares only the picked SKUs." }; ref = "A1:M" + tr; me = null; }
   if (me) {
+    var isBadT = (me.data && me.data.stockType || me.stockType) === "bad" || tkx.stockType === "bad", md = me.data || me;
     var tie = [["MB52 TIE-OUT (value, RM) - upload of " + tsTxt(me.loadedAt), null],
-      ["Good stock used as System (unrestricted + restricted + QI)", me.goodV],
+      isBadT ? ["Bad stock used as System (locations BS00/BS01/SH00, unrestricted + restricted + QI)", me.goodV] : ["Good stock used as System (unrestricted + restricted + QI)", me.goodV],
       ["Excluded: Blocked Stock", me.blockedV],
-      ["Excluded: bad-stock locations BS00/BS01/SH00", me.badLocV],
+      isBadT ? ["Excluded: good stock, and bad stock of plants not in the branch list", (md.goodStockV || 0) + Math.max(0, (me.badLocV || 0) - (me.goodV || 0))] : ["Excluded: bad-stock locations BS00/BS01/SH00", me.badLocV],
       ["Excluded: Stock in Transit", me.transitV],
       ["Excluded: plants not in branch list" + (me.skipped && me.skipped.length ? " (" + me.skipped.join(", ") + ")" : ""), me.skippedV],
       ["Total MB52 value (should equal the MB52 file total)", null],
-      ["Check: System value on Variance sheet less good stock used (should be 0; rounding under RM10 ignored)", null]];
+      ["Check: System value on Variance sheet less " + (isBadT ? "bad" : "good") + " stock used (should be 0; rounding under RM10 ignored)", null]];
     tie.forEach(function (rw, ix) { var x = tr + ix; su["A" + x] = { t: "s", v: rw[0] }; if (rw[1] != null) su["B" + x] = { t: "n", v: Math.round(rw[1] * 100) / 100, z: "#,##0.00" }; });
     su["B" + (tr + 6)] = { t: "n", f: "SUM(B" + (tr + 1) + ":B" + (tr + 5) + ")", z: "#,##0.00" };
     su["B" + (tr + 7)] = { t: "n", f: "IF(ABS(SUMPRODUCT((" + rg("Q") + "<>\"\")*1," + rg("Q") + "," + rg("S") + ")-B" + (tr + 1) + ")<10,0,ROUND(SUMPRODUCT((" + rg("Q") + "<>\"\")*1," + rg("Q") + "," + rg("S") + ")-B" + (tr + 1) + ",2))", z: "#,##0.00" };
@@ -165,13 +166,13 @@ export async function signoffPdf(b) {
   d.setFont("helvetica", "bold"); d.setFontSize(14); d.text("Nabati Food Malaysia", lx, 14.5);
   d.setFont("helvetica", "normal"); d.setFontSize(8.5); d.setTextColor(110); d.text("Stock count sign-off", lx, 19); d.setTextColor(0);
   d.setDrawColor(181, 18, 27); d.setLineWidth(0.6); d.line(14, 23, W - 14, 23); d.setLineWidth(0.2); d.setDrawColor(0); y = 31;
-  d.setFont("helvetica", "bold"); d.setFontSize(15); d.text(title + " - Count Sign-off", 14, y); y += 7;
+  d.setFont("helvetica", "bold"); d.setFontSize(15); d.text(title + " - Count Sign-off" + (tk.stockType === "bad" ? " - BAD STOCK" : ""), 14, y); y += 7;
   d.setFontSize(12); d.text(b + (tk.name ? "  ·  " + tk.name : ""), 14, y); d.setFont("helvetica", "normal"); d.setFontSize(9);
   var subs = ses.map(function (x) { return x.submittedAt || ""; }).filter(Boolean).sort();
   d.text("Count submitted: " + (subs.length ? tsTxt(subs[0]) + (subs.length > 1 ? " to " + tsTxt(subs[subs.length - 1]) : "") : "-") + "     Generated: " + tsTxt(nowIso()), W - 14, y, { align: "right" }); y += 5;
   if (!final) { d.setTextColor(200, 0, 0); d.setFont("helvetica", "bold"); d.text("DRAFT - not final: " + (!allSub ? "not all counts submitted. " : "") + (open ? open + " line(s) still RECOUNT / WAITING." : ""), 14, y); d.setTextColor(0); d.setFont("helvetica", "normal"); y += 5; }
   if (tk.scope === "partial") { d.setFont("helvetica", "bold"); d.text("Partial count: " + tk.skuCount + " picked SKU(s) only.", 14, y); d.setFont("helvetica", "normal"); y += 5; }
-  d.text("Quantities in PCS. " + (sg ? "Single count: one team counted; its count is the agreed count." : "Double count: Operations and Finance counted separately; only MATCH lines are agreed.") + " System = SAP MB52 good stock (bad/blocked excluded). Tolerance ±" + tolPct() + "% per SKU.", 14, y, { maxWidth: W - 28 }); y += 9;
+  d.text("Quantities in PCS. " + (sg ? "Single count: one team counted; its count is the agreed count." : "Double count: Operations and Finance counted separately; only MATCH lines are agreed.") + (tk.stockType === "bad" ? " System = SAP MB52 bad-stock locations BS00, BS01, SH00 only (good and blocked stock excluded)." : " System = SAP MB52 good stock (bad/blocked excluded).") + " Tolerance ±" + tolPct() + "% per SKU.", 14, y, { maxWidth: W - 28 }); y += 9;
   d.autoTable({ startY: y, theme: "grid", styles: { fontSize: 9, cellPadding: 1.6 }, headStyles: { fillColor: [60, 60, 60] }, head: [["Summary", "Value"]],
     body: [[sg ? "Lines - COUNTED" : "Lines - MATCH", F(lc.MATCH || 0)], ["Lines - RECOUNT / WAITING", F(open)], ["Lines - NOT COUNTED (system stock, nobody counted)", F(lc["NOT COUNTED"] || 0)],
       ["SKUs - OK / WITHIN " + tolPct() + "%", F((sk.OK || 0) + (sk["WITHIN " + tolPct() + "%"] || 0))], ["SKUs - OVER " + tolPct() + "%", F(sk["OVER " + tolPct() + "%"] || 0)], ["SKUs - PENDING / NOT COUNTED / NOT IN SYSTEM", F((sk.PENDING || 0) + (sk["NOT COUNTED"] || 0) + (sk["NOT IN SYSTEM"] || 0))],

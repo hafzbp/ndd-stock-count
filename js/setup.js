@@ -50,23 +50,25 @@ export function mb52Card(title, onDone, opts) {
         await loadAdmin();
       }
       var res = parseMB52(rows, branchesAdm(), pm), plants = res.plants;
+      var BAD = !opts.daily && (S.adm.takeInfo || {}).stockType === "bad", U = BAD ? res.byBrBad : res.byBr, nLines = BAD ? res.badLines : res.lines, uQ = BAD ? res.badQ : res.totQ, uV = BAD ? res.badV : res.totV;
+      if (!Object.keys(U).length) { msg(BAD ? "No bad stock in this MB52" : "No good stock in this MB52", BAD ? "This stock take counts bad stock, but the file has no rows in the bad-stock locations (BS00, BS01, SH00) for known warehouses." : "The file has no good-stock rows for known warehouses."); f.value = ""; return; }
       var skip = Object.keys(res.skipped).map(function (k) { return k + " RM" + fmt(res.skipped[k], 2); }).join(", ");
       var ti = opts.daily ? {} : (S.adm.takeInfo || {}), picked = ti.scope === "partial" ? (ti.skus || []) : null, inFile = {};
-      Object.keys(res.byBr).forEach(function (b) { res.byBr[b].forEach(function (r) { inFile[r[0]] = 1; }); });
+      Object.keys(U).forEach(function (b) { U[b].forEach(function (r) { inFile[r[0]] = 1; }); });
       var missingPicked = picked ? picked.filter(function (c0) { return !inFile[c0]; }) : [];
-      confirmBox("Load MB52?", res.lines + " lines for " + Object.keys(res.byBr).length + " branch(es). Qty " + fmt(res.totQ, 0) + " PCS" + (res.hasValue ? ", RM " + fmt(res.totV, 2) : "") + "." +
+      confirmBox("Load MB52?", (BAD ? "BAD STOCK - " : "") + nLines + " lines for " + Object.keys(U).length + " branch(es). Qty " + fmt(uQ, 0) + " PCS" + (res.hasValue ? ", RM " + fmt(uV, 2) : "") + "." +
         (skip ? "\nSKIPPED (branch not in list): " + skip : "") + (res.badBatches.length ? "\n" + res.badBatches.length + " batch value(s) not readable as dates: " + res.badBatches.slice(0, 8).join(", ") : "") +
-        (res.transit ? "\nStock in transit left out: " + fmt(res.transit, 0) + " PCS" : "") + (res.format === "mb52" ? "\nGood stock only. Left out: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" : "") +
+        (res.transit ? "\nStock in transit left out: " + fmt(res.transit, 0) + " PCS" : "") + (res.format === "mb52" ? (BAD ? "\nBad stock only (locations BS00, BS01, SH00). Good stock left out: " + fmt(res.totQ, 0) + " PCS." : "\nGood stock only. Left out: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" + (opts.daily && res.badLines ? " - kept apart for bad-stock counts" : "") + ".") : "") +
         (missingPicked.length ? "\n\n" + missingPicked.length + " picked SKU(s) are not in this MB52 at any branch: " + missingPicked.slice(0, 8).join(", ") : "") +
         (res.format === "report" ? "\n\nStock report format (SKU / Total in PCS). " + (res.hasValue ? "" : "It has no RM values, so variance shows in PCS only.") : "") +
         (opts.daily ? "\n\nThis becomes the system stock dated " + opts.daily.date() + " for daily counts." : "\n\nReplaces system stock for these branches."), "Load", async function () {
           var skV = 0; Object.keys(res.skipped).forEach(function (k) { skV += res.skipped[k]; });
           pill("Loading MB52…");
           try {
-            await rpc(opts.daily ? "admin_load_daily" : "admin_load_mb52", Object.assign(opts.daily ? { p_date: opts.daily.date() } : {}, { p_token: tok(), p_payload: { meta: { goodV: res.totV, goodQ: res.totQ, blockedV: res.exBlkV, badLocV: res.exBadV, transitV: res.trV, skippedV: skV, skipped: Object.keys(res.skipped), lines: res.lines }, byBr: res.byBr, descs: res.descs, plants: plants } }));
+            await rpc(opts.daily ? "admin_load_daily" : "admin_load_mb52", Object.assign(opts.daily ? { p_date: opts.daily.date() } : {}, { p_token: tok(), p_payload: { meta: { goodV: uV, goodQ: uQ, blockedV: res.exBlkV, badLocV: res.exBadV, transitV: res.trV, skippedV: skV, skipped: Object.keys(res.skipped), lines: nLines, stockType: BAD ? "bad" : "good", badQ: res.badQ, badV: res.badV, goodStockV: res.totV }, byBr: U, byBrBad: opts.daily ? res.byBrBad : undefined, descs: res.descs, plants: plants } }));
             await loadAdmin(); pill("Online", "ok");
             var noFac = (S.adm.skus || []).filter(function (s0) { return inFile[s0.code] && !s0.per; }).map(function (s0) { return s0.code; });
-            msg(opts.daily ? "Daily stock loaded" : "MB52 loaded", Object.keys(res.byBr).length + " branch(es)" + (opts.daily ? ", stock date " + opts.daily.date() + "." + (res.hasValue ? "" : "\n\nThis file has no RM values: ABC classes use quantity instead of value.") : ", plant codes ready for counter login.") + (noFac.length ? "\n\n" + noFac.length + " SKU(s) have no pcs per carton yet (" + noFac.slice(0, 6).join(", ") + (noFac.length > 6 ? "…" : "") + "). Add them in Settings → Pcs per Carton / Box, or counters can only count those in pieces." : ""));
+            msg(opts.daily ? "Daily stock loaded" : "MB52 loaded", Object.keys(U).length + " branch(es)" + (opts.daily ? ", stock date " + opts.daily.date() + "." + (res.hasValue ? "" : "\n\nThis file has no RM values: ABC classes use quantity instead of value.") : ", plant codes ready for counter login.") + (noFac.length ? "\n\n" + noFac.length + " SKU(s) have no pcs per carton yet (" + noFac.slice(0, 6).join(", ") + (noFac.length > 6 ? "…" : "") + "). Add them in Settings → Pcs per Carton / Box, or counters can only count those in pieces." : ""));
             onDone && onDone();
           } catch (e) { pill("Error", "bad"); msg("Load failed", errText(e)); }
         });

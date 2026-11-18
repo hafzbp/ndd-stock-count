@@ -70,7 +70,7 @@ export function renderMaster(app) {
   var started = br.filter(function (b) { return docs.some(function (d) { return d.branch === b; }); }).length;
   app.append(el("div", { class: "stats" }, stat(br.length, "Warehouses"), stat(started, "Started"), stat(both, sg ? "Submitted" : "Both teams submitted"), stat(tk.scope === "partial" ? tk.skuCount : (S.adm.skus || []).length, tk.scope === "partial" ? "SKUs picked" : "SKUs")));
   app.append(el("div", { class: "card row", style: "justify-content:space-between" },
-    el("div", {}, el("b", { text: (tk.name || "") + " · " + (tk.status === "closed" ? "Closed" : "Open") + (tk.scope === "partial" ? " · Partial" : "") }), el("div", { class: "small muted", text: sg ? "Single count: one team's count is the agreed count, compared to SAP." : "Double count: Ops vs Finance must MATCH before a line is compared to SAP." })),
+    el("div", {}, el("b", { text: (tk.name || "") + (tk.stockType === "bad" ? " · BAD STOCK" : "") + " · " + (tk.status === "closed" ? "Closed" : "Open") + (tk.scope === "partial" ? " · Partial" : "") }), el("div", { class: "small muted", text: sg ? "Single count: one team's count is the agreed count, compared to SAP." : "Double count: Ops vs Finance must MATCH before a line is compared to SAP." })),
     el("div", { class: "row" }, !ro() && tk.status === "closed" ? el("button", { class: "btn", text: "Start new stock take", title: "This stock take stays in History", onclick: function () { S.wizNew = true; S.wiz = null; S.tab = "home"; hooks.render(); window.scrollTo(0, 0); } }) : null,
       ro() ? null : el("button", { class: "btn", text: tk.status === "closed" ? "Reopen counting" : "Close counting", onclick: function () {
         var to = tk.status === "closed" ? "open" : "closed";

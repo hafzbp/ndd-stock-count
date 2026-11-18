@@ -190,5 +190,5 @@ tr.tot td{font-weight:700;background:var(--chip)}
 
 .kind{border-radius:10px;padding:10px 14px;margin:0 0 12px;display:flex;flex-direction:column;gap:2px;border-left:5px solid currentColor;text-align:left}
 .kind b{font-size:15px;letter-spacing:.04em}.kind span{font-size:13px;font-weight:600;opacity:.92}
-.kind-daily{background:var(--infobg);color:var(--info)}.kind-monthly{background:var(--monbg);color:var(--mon)}
+.kind-daily{background:var(--infobg);color:var(--info)}.kind-monthly{background:var(--monbg);color:var(--mon)}.kind-bad{background:var(--badbg);color:var(--bad)}
 .card.center .kind{margin:4px 0 14px}
