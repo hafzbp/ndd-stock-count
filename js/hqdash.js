@@ -96,9 +96,10 @@ export function renderDash(app) {
     var left = toMin(r.to) - now;
     if (isToday && r.status === "todo") att.push([left <= 60 ? "bad" : "warn", "Not started", r.branch + " · window ends " + r.to + (left > 0 ? " (" + left + " min left)" : " (ended)")]);
     if (isToday && r.status === "progress" && left < 0) att.push(["warn", "Still counting", r.branch + " · window ended " + r.to + ", " + r.counted + " of " + r.listed + " SKUs counted"]);
-    if (r.status === "nostock") att.push(["warn", "No stock data", r.branch + " isn't in any uploaded MB52"]);
     if (r.status === "skip") att.push(["", "Skipped", r.branch + " · " + (r.skipReason || "")]);
   });
+  var nost = R.filter(function (r) { return r.status === "nostock"; }).map(function (r) { return r.branch.replace(/^NDD\s+/, ""); });
+  if (nost.length) att.push(["warn", "No stock data", nost.length + " warehouse" + (nost.length > 1 ? "s aren't" : " isn't") + " in any uploaded MB52: " + nost.join(", ")]);
   B.forEach(function (b) {
     var mi = (b.cells || []).filter(function (c) { return c.st === "missed"; }).length, ap = pct(b.ok, b.counted);
     if (mi) att.push(["bad", "Missed", b.branch + " · " + mi + " day" + (mi > 1 ? "s" : "") + " in this period"]);
