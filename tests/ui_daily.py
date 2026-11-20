@@ -5,6 +5,7 @@ from playwright.sync_api import sync_playwright
 
 BASE = os.environ.get("BASE", "http://localhost:8787"); OUT = "/tmp/ndd-ui"
 ok = 0; bad = 0
+import datetime; _d = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))); TODAY = f"{_d.day} {_d.strftime('%b')}"
 def check(name, cond, extra=""):
     global ok, bad
     if cond: ok += 1; print("  ✓", name)
@@ -27,6 +28,10 @@ with sync_playwright() as p:
     ow = page(1280, 900); ow.goto(BASE + "/?api=local"); ow.click(B("Start first-time setup"))
     ow.fill("input[placeholder='Setup code']", "SETUP-123"); ow.fill("input[placeholder^='New owner password']", "OwnerPass1"); ow.fill("input[placeholder='Repeat password']", "OwnerPass1")
     ow.click(SB("Save")); ow.click(SB("OK"))
+    ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Minimum SKUs a day")
+    mn = ow.locator(".card:has(h3:text-is('Daily cycle count')) .row:has-text('Minimum SKUs a day') input")
+    check("Settings: minimum SKUs a day defaults to 10", mn.input_value() == "10", mn.input_value())
+    mn.fill("1"); ow.click(B("Save rules")); ow.click(SB("OK"))   # the list checks below test the ABC planning itself
     ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily stock (MB52)")
     check("Daily tab: asks for the first upload", ow.is_visible("text=Upload the MB52 to start daily counts"))
     ow.set_input_files(".card:has(h3:text-is('Daily stock (MB52)')) input[type=file]", f"{OUT}/mb52.xlsx"); ow.wait_for_selector("#sheet >> text=New branches in this MB52")
@@ -50,7 +55,7 @@ with sync_playwright() as p:
     print("counter: today's list")
     op = page(390, 844); op.goto(BASE + "/?api=local"); op.wait_for_selector("text=Enter your warehouse plant code"); pad(op, "1501")
     op.wait_for_selector(".kind-daily"); kt = op.inner_text(".kind-daily")
-    check("confirm: big DAILY label with date, SKU count and finish time", "DAILY CYCLE COUNT" in kt and "1 SKU" in kt and "finish by 10:00" in kt and "18 Nov" in kt, kt)
+    check("confirm: big DAILY label with date, SKU count and finish time", "DAILY CYCLE COUNT" in kt and "1 SKU" in kt and "finish by 10:00" in kt and TODAY in kt, kt)
     check("confirm: no monthly label", not op.is_visible(".kind-monthly"))
     op.click(B("Yes, that's my warehouse")); op.wait_for_selector("text=Who is counting?")
     check("daily = single count: no team step", not op.is_visible("text=Which team are you?"))
@@ -93,7 +98,7 @@ with sync_playwright() as p:
         ow.click(f"{mc} tr:has(td:text-is('{nm}')) button:text-is('Save')"); ow.wait_for_timeout(600)
     check("region + NOM saved", ow.input_value(f"{mc} tr:has(td:text-is('NDD Beta')) input >> nth=0") == "North")
     ow.click("#tabs button:text-is('Dashboard')"); ow.wait_for_selector("text=Compliance · warehouse × day")
-    dt = ow.inner_text("main"); check("admin dashboard: all sections", all(x in dt for x in ["Due today", "Not started", "Accuracy (IRA)", "Net variance", "Needs attention", "Today per warehouse", "Accuracy by warehouse", "Result by SKU", "Counters", "ABC coverage", "Repeat variance SKUs", "Compliance", "By warehouse", "Top variance SKUs", "Bad stock (later phase)"]), dt[:800])
+    dt = ow.inner_text("main"); check("admin dashboard: all sections", all(x in dt for x in ["Due today", "Not started", "SKU accuracy", "Net variance", "Needs attention", "Today per warehouse", "SKU accuracy by warehouse", "KPI001", "KPI002", "Daily cycle count", "Stock take (end of month)", "Result by SKU", "Counters", "ABC coverage", "Repeat variance SKUs", "Compliance", "By warehouse", "Top variance SKUs", "Bad stock (later phase)"]), dt[:800])
     tw = ow.inner_text(".card:has(h3:text-is('Today per warehouse'))"); check("today table: Alpha counting 1 / 2, Beta not started", "Counting" in tw and "1 / 2" in tw and "Not started" in tw, tw)
     check("needs attention lists the not-started warehouses", "NDD Beta" in ow.inner_text(".card:has(h3:text-is('Needs attention'))"), ow.inner_text(".card:has(h3:text-is('Needs attention'))"))
     ow.select_option("main select >> nth=1", "Central"); ow.wait_for_timeout(300)

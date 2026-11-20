@@ -64,7 +64,7 @@ export function renderDccStats(root, st, opts) {
   if (!opts.noKpi) root.append(el("div", { class: "stats dccst" },
     kpi(todayIdx >= 0 ? tdDone + " / " + tdTot : "-", "Counted today", todayIdx >= 0 ? (tdTot - tdDone) + " still to submit" : "today is outside this period"),
     kpi(pctTxt(covP), "SKU coverage", paceAvg == null ? "" : "pace " + paceAvg.toFixed(0) + "% · " + (covP != null && covP >= paceAvg ? "on track" : "behind")),
-    kpi(pctTxt(accP), "Accuracy (IRA)", "target " + target + "% · " + n + " SKU counts"),
+    kpi(pctTxt(accP), "SKU accuracy", "target " + target + "% · " + n + " SKU counts"),
     st.withRm ? kpi(rm(net), "Net variance", "absolute " + rm(abs)) : null,
     kpi(String(late + missed), "Late or missed days", late + " late · " + missed + " missed")));
 
@@ -89,7 +89,7 @@ export function renderDccStats(root, st, opts) {
   var mon = String(st.to).slice(0, 7), mdays = new Date(Number(mon.slice(0, 4)), Number(mon.slice(5, 7)), 0).getDate();
   var covS = tr.map(function (x) { return st.universe ? Math.round(x.covered / st.universe * 1000) / 10 : null; }), ideal = tr.map(function (x) { return String(x.d).slice(0, 7) === mon ? Math.round(dd(x.d) / mdays * 1000) / 10 : null; });
   root.append(el("div", { class: "grid2" },
-    el("div", { class: "card" }, el("h3", { text: "Accuracy trend" + (opts.only || opts.branch ? " (all warehouses)" : "") }), el("div", { class: "legend small muted" }, el("span", {}, el("i", { style: "background:#2a78d6" }), "Accuracy, all warehouses"), el("span", {}, "- - target " + target + "%")),
+    el("div", { class: "card" }, el("h3", { text: "SKU accuracy trend" + (opts.only || opts.branch ? " (all warehouses)" : "") }), el("div", { class: "legend small muted" }, el("span", {}, el("i", { style: "background:#2a78d6" }), "Accuracy, all warehouses"), el("span", {}, "- - target " + target + "%")),
       lineChart([{ v: acc, color: "#2a78d6" }, { v: acc.map(function () { return target; }), color: "#898781", dash: "5 4", w: 1.5 }], labels, lo, 100, "%")),
     el("div", { class: "card" }, el("h3", { text: "Coverage this month" + (opts.only || opts.branch ? " (all warehouses)" : "") }), el("div", { class: "legend small muted" }, el("span", {}, el("i", { style: "background:#2a78d6" }), "SKUs counted at least once"), el("span", {}, "- - pace to 100%")),
       lineChart([{ v: covS, color: "#2a78d6" }, { v: ideal, color: "#898781", dash: "5 4", w: 1.5 }], labels, 0, 100, "%"))));

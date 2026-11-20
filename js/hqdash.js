@@ -4,7 +4,8 @@ import { S, hooks } from "./state.js";
 import { rpc } from "./api.js";
 import { el, fmt, msg, errText } from "./ui.js";
 import { renderDccStats, ensureDccCss, ST } from "./dcc.js";
-import { exportDailyReport } from "./export.js";
+import { exportDailyReport, xlsxLib } from "./export.js";
+import { renderKpi, demoOps, demoKpi, kpiMonths, KPI_CSS } from "./kpi.js";
 
 var TARGET = 98;
 function tok() { return S.admin.token; }
@@ -28,17 +29,19 @@ var CSS = ".hq-att li{margin:4px 0;list-style:none}.hq-att{padding:0;margin:0}.h
   ".hq-mix{display:flex;height:18px;border-radius:4px;overflow:hidden;gap:2px;margin:6px 0 8px}.hq-mix i{display:block}" +
   ".hq-key{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--mute)}.hq-key span{display:inline-flex;align-items:center;gap:5px}.hq-key i{width:10px;height:10px;border-radius:2px;display:inline-block}" +
   ".hq-later{border-style:dashed}";
-function ensureCss() { ensureDccCss(); if (!document.getElementById("hq-css")) document.head.append(el("style", { id: "hq-css", text: CSS })); }
+function ensureCss() { ensureDccCss(); if (!document.getElementById("hq-css")) document.head.append(el("style", { id: "hq-css", text: CSS + KPI_CSS })); }
 
 export function renderDash(app) {
   ensureCss();
   var today = (S.dashToday && S.dashToday.today) || (S.dcc && S.dcc.today) || iso(new Date());
+  if (S.demo) today = iso(new Date());
   if (!S.dashP) S.dashP = { per: "mtd", br: "", region: "", nom: "" };
   var P = S.dashP, first = today.slice(0, 8) + "01";
   var from = P.per === "7d" ? addDays(today, -6) : P.per === "lm" ? addDays(first, -1).slice(0, 8) + "01" : first;
   var to = P.per === "lm" ? addDays(first, -1) : today, key = from + to;
 
-  var rows = (S.dashToday && S.dashToday.rows) || [];
+  var D = S.demo ? demoOps(today, from, to) : null;
+  var rows = ((D ? D.today : S.dashToday) || {}).rows || [];
   var meta = {}; rows.forEach(function (r) { meta[r.branch] = r; });
   var vals = function (k) { var o = {}; rows.forEach(function (r) { if (r[k]) o[r[k]] = 1; }); return Object.keys(o).sort(); };
   var pick = function (val, label, opts, onc) {
@@ -55,13 +58,26 @@ export function renderDash(app) {
     vals("nom").length ? pick(P.nom, "All NOMs", vals("nom"), function (v) { P.nom = v; }) : null,
     pick(P.br, "All warehouses", names, function (v) { P.br = v; }),
     el("button", { class: "btn", text: "↻", title: "Refresh", onclick: function () { S.dashData = null; S.dashIns = null; S.dashToday = null; hooks.render(); } }),
-    el("button", { class: "btn", text: "⬇ Export", title: "Excel report for this period and these warehouses", onclick: function () { exportDailyReport(from, to, (P.region || P.nom || P.br) ? rows.map(function (r) { return r.branch; }).filter(inScope) : null); } }),
+    el("button", { class: "btn", text: "⬇ Export", disabled: !!D, title: D ? "The daily report uses live data only - turn Demo data off" : "Excel report for this period and these warehouses", onclick: function () { exportDailyReport(from, to, (P.region || P.nom || P.br) ? rows.map(function (r) { return r.branch; }).filter(inScope) : null); } }),
+    el("button", { class: "chip" + (S.demo ? " on" : ""), "aria-pressed": S.demo ? "true" : "false", title: "Show made-up data for 12 NDDs to demo the dashboard. Nothing is saved.", text: (S.demo ? "✓ " : "") + "Demo data",
+      onclick: function () { S.demo = !S.demo; P.br = ""; P.region = ""; P.nom = ""; hooks.render(); } }),
     el("a", { class: "link small", href: "dashboard/", target: "_blank", rel: "noopener", text: "Public view (no RM) ↗" })));
+  if (D) app.append(el("div", { class: "banner warn" }, el("b", { text: "Demo data. " }), "Made-up numbers for 12 NDDs to show how the dashboard works. Nothing here is real and nothing is saved. Turn off \"Demo data\" for live data."));
+  var mons = kpiMonths(today); if (!S.kpiMonth || mons.indexOf(S.kpiMonth) < 0) S.kpiMonth = mons[0];
+  var KD = D ? demoKpi(today, S.kpiMonth) : (S.kpi && S.kpi.month === S.kpiMonth ? S.kpi : null);
+  if (!KD && !S.kpiLoading) {
+    S.kpiLoading = true;
+    rpc("admin_kpi", { p_token: tok(), p_month: S.kpiMonth }).then(function (r) { S.kpi = r; S.kpiLoading = false; hooks.render(); },
+      function (e) { S.kpiLoading = false; msg("Can't load KPI", errText(e)); });
+  }
+  renderKpi(app, { today: today, month: S.kpiMonth, setMonth: function (m) { S.kpiMonth = m; hooks.render(); }, data: KD, demo: !!D, exportLib: xlsxLib,
+    inScope: inScope, filtered: !!(P.region || P.nom || P.br) });
+  app.append(el("div", { class: "kh", style: "margin-top:18px" }, el("h2", { text: "Daily operations" })));
 
-  if (!S.dashData || S.dashKey !== key || !S.dashIns || !S.dashToday) {
+  if (!D && (!S.dashData || S.dashKey !== key || !S.dashIns || !S.dashToday)) {
     app.append(el("p", { class: "center muted", text: "Loading…" }));
     if (S.dashLoading) return;
-    S.dashLoading = true;
+    S.dashLoading = true; if (!S.kpiLoading) S.kpi = null;   // KPI follows the same refresh
     Promise.all([
       S.dashData && S.dashKey === key ? S.dashData : rpc("admin_dcc_stats", { p_token: tok(), p_from: from, p_to: to }),
       S.dashIns && S.dashKey === key ? S.dashIns : rpc("admin_dcc_insights", { p_token: tok(), p_from: from, p_to: to }),
@@ -71,7 +87,7 @@ export function renderDash(app) {
     return;
   }
 
-  var st = S.dashData, ins = S.dashIns, T = S.dashToday, only = rows.map(function (r) { return r.branch; }).filter(inScope);
+  var st = D ? D.stats : S.dashData, ins = D ? D.ins : S.dashIns, T = D ? D.today : S.dashToday, only = rows.map(function (r) { return r.branch; }).filter(inScope);
   var R = rows.filter(function (r) { return inScope(r.branch); }), B = (st.branches || []).filter(function (b) { return inScope(b.branch); });
   var now = nowMin(T.now), isToday = T.date === T.today;
 
@@ -87,7 +103,7 @@ export function renderDash(app) {
     kpi(String(cnt("ontime") + cnt("late")), "Submitted", cnt("ontime") + " on time · " + cnt("late") + " late"),
     kpi(String(cnt("progress")), "Counting", "started, not submitted"),
     kpi(String(cnt("todo")), "Not started", ends.length ? "first window ends " + ends[0] : "", cnt("todo") ? "neg" : ""),
-    kpi(pctTxt(accP), "Accuracy (IRA)", "target " + TARGET + "% · " + n + " SKU counts", accP != null && accP < TARGET ? "neg" : ""),
+    kpi(pctTxt(accP), "SKU accuracy", "daily counts · target " + TARGET + "% · " + n + " SKU counts", accP != null && accP < TARGET ? "neg" : ""),
     kpi(pctTxt(covP), "SKU coverage", pace == null ? "" : "pace " + pace.toFixed(0) + "% · " + (covP != null && covP >= pace ? "on track" : "behind")),
     kpi(rm(net), "Net variance", "absolute " + rm(abs))));
 
@@ -148,7 +164,7 @@ export function renderDash(app) {
     mixC.append(el("div", { class: "hq-mix" }, segs.filter(function (s) { return mix[s[0]]; }).map(function (s) { return el("i", { title: s[1] + ": " + mix[s[0]], style: "width:" + (mix[s[0]] / mt * 100) + "%;background:" + s[2] }); })),
       el("div", { class: "hq-key" }, segs.map(function (s) { return el("span", {}, el("i", { style: "background:" + s[2] }), s[1] + " " + mix[s[0]] + " (" + Math.round(mix[s[0]] / mt * 100) + "%)"); })));
   } else mixC.append(el("p", { class: "muted small", text: "No submitted counts in this period yet." }));
-  var accC = card("Accuracy by warehouse", "Worst first. The line marks the " + TARGET + "% target.");
+  var accC = card("SKU accuracy by warehouse", "Worst first. The line marks the " + TARGET + "% target.");
   accC.append(accRows.length ? bars : el("p", { class: "muted small", text: "No submitted counts in this period yet." }));
   app.append(el("div", { class: "grid2" }, accC, mixC));
 

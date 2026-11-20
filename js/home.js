@@ -71,14 +71,15 @@ export function renderHome(app) {
 }
 
 /* ---------------- Draft: wizard ---------------- */
+function kpiDefault() { var d = new Date(); if (d.getDate() <= 10) d.setMonth(d.getMonth() - 1); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-01"; }
 function renderWizard(app, t) {
   var fresh = S.wizNew;
   var W = S.wiz && S.wiz.id === (fresh ? "new" : t.id) ? S.wiz : (S.wiz = {
     id: fresh ? "new" : t.id, step: 1,
-    name: fresh ? "" : t.name, scope: fresh ? "total" : (t.scope || "total"), mode: fresh ? "double" : (t.mode || "double"), stype: fresh ? "good" : (t.stockType || "good"), skus: fresh ? {} : (t.skus || []).reduce(function (o, c) { o[c] = 1; return o; }, {})
+    name: fresh ? "" : t.name, scope: fresh ? "total" : (t.scope || "total"), mode: fresh ? "double" : (t.mode || "double"), stype: fresh ? "good" : (t.stockType || "good"), kpi: fresh ? false : !!t.kpiMonth, kpiMon: (!fresh && t.kpiMonth) || kpiDefault(), skus: fresh ? {} : (t.skus || []).reduce(function (o, c) { o[c] = 1; return o; }, {})
   });
   var hasSys = !fresh && Object.keys(S.sysBy || {}).length > 0, partial = W.scope === "partial", nSku = Object.keys(W.skus).length;
-  var steps = [[1, "Name and type", W.name ? (W.stype === "bad" ? "Bad stock · " : "Good stock · ") + (partial ? "Partial" : "Total") + " · " + (W.mode === "single" ? "Single" : "Double") : "Not set"], [2, "Pick SKUs", partial ? nSku + " picked" : "Not needed (Total)"], [3, "Upload MB52", hasSys ? Object.keys(S.sysBy).length + " warehouses" : "Not yet"], [4, "Open counting", "Review and open"]];
+  var steps = [[1, "Name and type", W.name ? (W.stype === "bad" ? "Bad stock · " : "Good stock · ") + (W.kpi && W.stype === "good" ? "KPI · " : "") + (partial ? "Partial" : "Total") + " · " + (W.mode === "single" ? "Single" : "Double") : "Not set"], [2, "Pick SKUs", partial ? nSku + " picked" : "Not needed (Total)"], [3, "Upload MB52", hasSys ? Object.keys(S.sysBy).length + " warehouses" : "Not yet"], [4, "Open counting", "Review and open"]];
   app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: fresh ? "New stock take" : "Set up the stock take" }), stateTag("draft")));
   if (fresh) app.append(el("p", { class: "small muted", text: "The last stock take stays in History below." }));
   var bar = el("div", { class: "wiz" });
@@ -95,7 +96,8 @@ function renderWizard(app, t) {
       await rpc("admin_draft", { p_token: tok(), p_name: W.name, p_scope: W.scope, p_skus: skus });
       await rpc("admin_set_mode", { p_token: tok(), p_mode: W.mode });
       await rpc("admin_set_stock_type", { p_token: tok(), p_type: W.stype });
-      S.wizNew = false; await loadAdmin(); S.wiz = Object.assign(W, { id: info().id, step: next }); hooks.render(); window.scrollTo(0, 0);
+      S.wizNew = false; await loadAdmin();
+      if ((W.kpi && W.stype === "good") || info().kpiMonth) { await rpc("admin_set_kpi_month", { p_token: tok(), p_take: info().id, p_month: W.kpi && W.stype === "good" ? W.kpiMon : null }); S.kpi = null; await loadAdmin(); } S.wiz = Object.assign(W, { id: info().id, step: next }); hooks.render(); window.scrollTo(0, 0);
     } catch (e) { msg("Can't save", errText(e)); }
   }
 
@@ -113,8 +115,15 @@ function renderWizard(app, t) {
     [["double", "Double count", "Ops and Finance count separately. A line is agreed only when both match. For full stock takes and audits."], ["single", "Single count", "One team counts. Its count is the agreed count. Faster, but no second check."]].forEach(function (o) {
       mc.append(el("button", { class: "choice" + (W.mode === o[0] ? " on" : ""), onclick: function () { W.mode = o[0]; hooks.render(); } }, el("b", { text: o[1] }), el("div", { class: "small muted", text: o[2] })));
     });
+    var mo = function (off) { var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + off); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-01"; };
+    var mt = function (m) { return new Date(m + "T00:00:00").toLocaleDateString("en-GB", { month: "long", year: "numeric" }); };
+    var kc = el("input", { type: "checkbox", checked: W.kpi && W.stype === "good", disabled: W.stype !== "good", onchange: function (e) { W.kpi = e.target.checked; } });
+    var ks = el("select", { style: "max-width:180px", disabled: W.stype !== "good", onchange: function (e) { W.kpiMon = e.target.value; } }, [mo(-1), mo(0)].concat(W.kpiMon && [mo(-1), mo(0)].indexOf(W.kpiMon) < 0 ? [W.kpiMon] : []).map(function (m) { return el("option", { value: m, text: mt(m), selected: m === W.kpiMon }); }));
+    var kpiBox = el("div", { class: "kpibox" }, el("label", { class: "row", style: "gap:8px;flex-wrap:nowrap" }, kc, el("span", {}, el("b", { text: "Month-end stock take (KPI002)" }), el("span", { class: "small muted", text: W.stype === "good" ? " - its result is the stock take IRA of the month on the KPI dashboard" : " - good stock only" }))),
+      el("div", { class: "row", style: "margin:6px 0 0 28px" }, el("span", { class: "small", text: "For" }), ks));
     c.append(el("h3", { text: "1. Name and type" }), el("p", { class: "small muted", text: "Counters see this name. The type decides which SKUs they count." }), nm,
       el("p", { class: "small", style: "margin:14px 0 0;font-weight:600", text: "Which stock?" }), stc,
+      kpiBox,
       el("p", { class: "small", style: "margin:14px 0 0;font-weight:600", text: "Which SKUs?" }), ch,
       el("p", { class: "small", style: "margin:14px 0 0;font-weight:600", text: "How many teams count?" }), mc,
       el("div", { class: "row", style: "justify-content:flex-end;margin-top:14px" }, fresh ? el("button", { class: "btn", text: "Cancel", onclick: function () { S.wizNew = false; S.wiz = null; hooks.render(); } }) : null,

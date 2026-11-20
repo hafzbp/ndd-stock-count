@@ -192,3 +192,5 @@ tr.tot td{font-weight:700;background:var(--chip)}
 .kind b{font-size:15px;letter-spacing:.04em}.kind span{font-size:13px;font-weight:600;opacity:.92}
 .kind-daily{background:var(--infobg);color:var(--info)}.kind-monthly{background:var(--monbg);color:var(--mon)}.kind-bad{background:var(--badbg);color:var(--bad)}
 .card.center .kind{margin:4px 0 14px}
+
+.kpibox{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}

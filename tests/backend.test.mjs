@@ -327,6 +327,7 @@ await t("no stock upload yet: nothing planned, counter told there's nothing to c
   const o = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(o.rows.find((x) => x.branch === "NDD Alpha").why, "nostock");
 });
 await t("daily stock upload; ABC by value per warehouse (A 80%, B next 15%, C rest)", async () => {
+  await rpc("admin_settings", { p_token: A2, p_patch: { dcc_min_skus: 1 } });   // the list tests below check the ABC planning itself
   const r = await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-17", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) }); assert.equal(r.branches, 2);
   const kinds = (await db.query("select k.stype, k.code, k.qty::int as qty from public.snap_stock k join public.snapshots x on x.id = k.snap_id where x.snap_date = '2026-11-17' and k.branch = 'NDD Alpha' and k.stype = 'bad'")).rows;
   assert.deepEqual(kinds, [{ stype: "bad", code: "A1", qty: 99 }], "daily upload keeps bad stock apart");
@@ -466,6 +467,56 @@ await t("monthly stock take open at a warehouse takes over from the daily count"
   assert.equal((await rpc("admin_load", { p_token: A2 })).takes.every((x) => x.kind === "monthly"), true);
   await rpc("admin_set_status", { p_token: A2, p_status: "closed" });
   assert.equal((await rpc("plant_login", { p_code: "1501" })).take.kind, "daily");
+});
+await t("KPI001: a day passes when submitted the same day with the minimum SKUs; skip fails; holidays leave HKE", async () => {
+  await rejects(rpc("admin_kpi", { p_token: TD }), /login|admin/i);
+  let k = await rpc("admin_kpi", { p_token: A2, p_month: "2026-11-01" }), cell = (br, d) => k.branches.find((x) => x.branch === br).cells.find((c) => c.d === d);
+  assert.equal(k.month, "2026-11-01"); assert.equal(k.minSkus, 1);
+  assert.equal(cell("NDD Alpha", "2026-11-18").st, "pass"); assert.equal(cell("NDD Alpha", "2026-11-18").skus, 2);
+  assert.equal(cell("NDD Alpha", "2026-11-19").st, "skip"); assert.equal(cell("NDD Beta", "2026-11-18").st, "missed");
+  assert.equal(cell("NDD Alpha", "2026-11-23").st, "pending"); assert.equal(cell("NDD Alpha", "2026-11-30").st, "future");
+  await rpc("admin_settings", { p_token: A2, p_patch: { dcc_min_skus: 3 } });
+  k = await rpc("admin_kpi", { p_token: A2, p_month: "2026-11-01" }); assert.equal(cell("NDD Alpha", "2026-11-18").st, "under");
+  await rejects(rpc("admin_settings", { p_token: A2, p_patch: { dcc_min_skus: 0 } }), /1-50/);
+  const hs = await rpc("admin_holidays", { p_token: A2, p_add: { day: "2026-11-30", name: "Test holiday", branches: ["NDD Beta"] } });
+  k = await rpc("admin_kpi", { p_token: A2, p_month: "2026-11-01" });
+  assert.equal(cell("NDD Beta", "2026-11-30").st, "holiday"); assert.equal(cell("NDD Alpha", "2026-11-30").st, "future");
+  await rpc("admin_holidays", { p_token: A2, p_delete: hs[0].id });
+  assert.equal(k.trend.length, 6); assert.equal(k.trend[5].month, "2026-11-01");
+});
+await t("daily list is topped up to the minimum SKUs a day (all SKUs when a warehouse has fewer)", async () => {
+  await rpc("admin_settings", { p_token: A2, p_patch: { dcc_min_skus: 4 } });
+  await day("2026-11-24");
+  const o = await rpc("admin_dcc_day", { p_token: A2 });
+  assert.equal(Object.keys(o.rows.find((x) => x.branch === "NDD Alpha").take.plan).length, 4);
+  assert.equal(Object.keys(o.rows.find((x) => x.branch === "NDD Beta").take.plan).length, 2);
+  await rpc("admin_settings", { p_token: A2, p_patch: { dcc_min_skus: 1 } });
+});
+await t("KPI002: IRA by value from the month-end stock take; a SKU nobody counted counts as not found", async () => {
+  const id = (await db.query("insert into public.stock_takes (name, kind, status, mode, scope, skus, opened_at, closed_at) values ('Month-end Nov', 'monthly', 'closed', 'single', 'total', '{}', '2026-11-29 08:00+08', '2026-11-29 18:00+08') returning id")).rows[0].id;
+  await db.query("insert into public.sys_stock (take_id, branch, code, batch, qty, unit_cost) values ($1, 'NDD Alpha', 'A1', '2027-03', 264, 2), ($1, 'NDD Alpha', 'C3', '2027-01', 100, 5)", [id]);
+  await db.query("insert into public.count_sessions (take_id, device_id, branch, role, data, status, submitted_at) values ($1, 'd-k', 'NDD Alpha', 'ops', $2, 'submitted', now())", [id, JSON.stringify({ member: "Ali", lines: { "A1|2027-03": L("A1", "2027-03", null, null, 260) } })]);
+  await rejects(rpc("admin_set_kpi_month", { p_token: TD, p_take: id, p_month: "2026-11-01" }), /login|admin/i);
+  assert.equal((await rpc("admin_set_kpi_month", { p_token: A2, p_take: id, p_month: "2026-11-15" })).kpiMonth, "2026-11-01");
+  const k = await rpc("admin_kpi", { p_token: A2, p_month: "2026-11-01" }), al = k.branches.find((x) => x.branch === "NDD Alpha");
+  assert.equal(k.kpi2Take.name, "Month-end Nov");
+  assert.equal(al.kpi2.sysRm, 1028); assert.equal(al.kpi2.absRm, 508); assert.equal(al.kpi2.ira, Number((1 - 508 / 1028).toFixed(6)));
+  assert.equal(al.top[0].code, "A1"); assert.equal(al.top[0].varRm, -8);
+  assert.equal(k.trend[5].ira, al.kpi2.ira);
+  /* public dashboard: no RM and no SKUs ever; the IRA % only at dashboard level "value" */
+  await rpc("admin_settings", { p_token: A2, p_patch: { dash_level: "progress" } });
+  let pk = await rpc("public_kpi", { p_month: "2026-11-01" }), pa = pk.branches.find((x) => x.branch === "NDD Alpha");
+  assert.equal(pk.kpi2Hidden, true); assert.equal(pa.kpi2, null); assert.equal(pk.kpi2Take, null); assert.equal(pk.trend[5].ira, null);
+  assert.deepEqual(pa.cells.map((c) => c.st), k.branches.find((x) => x.branch === "NDD Alpha").cells.map((c) => c.st), "KPI001 is the same as the admin view");
+  await rpc("admin_settings", { p_token: A2, p_patch: { dash_level: "value" } });
+  pk = await rpc("public_kpi", { p_month: "2026-11-01" }); pa = pk.branches.find((x) => x.branch === "NDD Alpha");
+  assert.equal(pk.kpi2Hidden, false); assert.equal(pa.kpi2.ira, al.kpi2.ira); assert.equal(pk.kpi2Ira, k.kpi2Ira); assert.equal(k.kpi2Ira, al.kpi2.ira, "only Alpha in this take"); assert.equal(pa.kpi2.sysRm, null); assert.equal(pa.kpi2.absRm, null);
+  assert.deepEqual(pa.top, []); assert.equal(pk.kpi2Take.id, null); assert.equal(JSON.stringify(pk).includes("508"), false, "no RM figure anywhere");
+  await rpc("admin_settings", { p_token: A2, p_patch: { dash_level: "progress" } });
+  await rejects(rpc("public_kpi", { p_month: "2026-04-01" }), /last 6 months/); await rejects(rpc("public_kpi", { p_month: "2026-12-01" }), /last 6 months/);
+  await db.query("update public.stock_takes set stock_type = 'bad' where id = $1", [id]);
+  await rejects(rpc("admin_set_kpi_month", { p_token: A2, p_take: id, p_month: "2026-11-01" }), /good-stock/);
+  await db.query("delete from public.stock_takes where id = $1", [id]);
 });
 await t("owner deletes a closed stock take (counts, results, photos); admin can't; open one can't be deleted", async () => {
   const OW = (await rpc("admin_login", { p_password: "OwnerPass1" })).token;

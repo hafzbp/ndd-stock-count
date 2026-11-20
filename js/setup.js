@@ -99,7 +99,8 @@ export function renderSetup(app) {
   if (!S.adm) { app.append(el("p", { class: "center muted", text: "Loading…" })); loadAdmin().then(hooks.render); return; }
   var A = S.adm, st = A.settings || {}, tk = currentTake();
   app.append(el("div", { class: "banner warn", text: "Admin only. Settings that stay the same between stock takes. Counters never see system quantities." }));
-  app.append(dccCard(A, st), metaCard());
+  if (S.meta && S.meta.length !== (A.branches || []).filter(function (b) { return b.active; }).length) S.meta = null;   // warehouses added by an MB52 upload since
+  app.append(dccCard(A, st), holidayCard(A), metaCard());
 
   /* 2. factors */
   var fa = el("textarea", { placeholder: "Item Code\tPcs per CTN\tPcs per BOX\n650505\t240\t24" });
@@ -281,7 +282,8 @@ function metaCard() {
     el("p", { class: "small muted", text: "Used to filter the dashboard. Type the same spelling for warehouses that belong together; earlier values are suggested." }));
   if (!S.meta) {
     c.append(el("p", { class: "muted small", text: "Loading…" }));
-    rpc("admin_branch_meta", { p_token: tok() }).then(function (r) { S.meta = r; hooks.render(); }, function (e) { c.append(el("p", { class: "small", style: "color:var(--bad)", text: errText(e) })); });
+    if (S.metaLoading) return c; S.metaLoading = true;
+    rpc("admin_branch_meta", { p_token: tok() }).then(function (r) { S.meta = r; S.metaLoading = false; hooks.render(); }, function (e) { S.metaLoading = false; c.append(el("p", { class: "small", style: "color:var(--bad)", text: errText(e) })); });
     return c;
   }
   var uniq = function (k) { var o = {}; S.meta.forEach(function (x) { if (x[k]) o[x[k]] = 1; }); return Object.keys(o).sort(); };
@@ -301,19 +303,51 @@ function metaCard() {
   return c;
 }
 
+function holidayCard(A) {
+  var c = el("div", { class: "card" }, el("h3", { text: "Holidays (KPI001)" }),
+    el("p", { class: "small muted", style: "margin:0 0 8px", text: "A holiday is not a working day: no daily list and it does not count in HKE. Leave the warehouses empty for a national holiday, or pick the warehouses for a state holiday." }));
+  if (!S.holidays) {
+    c.append(el("p", { class: "muted small", text: "Loading…" }));
+    if (!S.holLoading) { S.holLoading = true; rpc("admin_holidays", { p_token: tok() }).then(function (r) { S.holidays = r; S.holLoading = false; hooks.render(); }, function (e) { S.holLoading = false; msg("Can't load holidays", errText(e)); }); }
+    return c;
+  }
+  var save = async function (args, ok) { try { S.holidays = await rpc("admin_holidays", Object.assign({ p_token: tok() }, args)); S.kpi = null; toast(ok); hooks.render(); } catch (e) { msg("Save failed", errText(e)); } };
+  var t = el("table", {}, el("tr", {}, ["Date", "Name", "Warehouses", ""].map(function (h) { return el("th", { text: h }); })));
+  S.holidays.forEach(function (h) {
+    t.append(el("tr", {}, el("td", { text: new Date(h.day + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) }), el("td", { text: h.name }),
+      el("td", { class: "small", text: h.branches.length ? h.branches.join(", ") : "All (national)" }),
+      el("td", {}, el("button", { class: "link", text: "Remove", onclick: function () { save({ p_delete: h.id }, "Holiday removed"); } }))));
+  });
+  if (!S.holidays.length) t.append(el("tr", {}, el("td", { colspan: 4, class: "muted", text: "No holidays yet." })));
+  var d = el("input", { type: "date", style: "width:160px" }), n = el("input", { type: "text", placeholder: "Name, e.g. Deepavali", style: "max-width:220px" }), pick = {};
+  var chips = el("div", { class: "row", style: "gap:4px" }, (A.branches || []).filter(function (b) { return b.active; }).map(function (b) {
+    var x = el("button", { class: "chip", text: b.name.replace(/^NDD\s+/i, ""), onclick: function () { if (pick[b.name]) delete pick[b.name]; else pick[b.name] = 1; x.classList.toggle("on"); } }); return x;
+  }));
+  c.append(el("div", { class: "tw" }, t), el("div", { class: "row", style: "margin-top:10px" }, d, n),
+    el("p", { class: "small muted", style: "margin:8px 0 4px", text: "Only these warehouses (none picked = all):" }), chips,
+    el("div", { class: "row", style: "justify-content:flex-end;margin-top:8px" }, el("button", { class: "btn primary", text: "Add holiday", onclick: function () {
+      if (!d.value) return msg("Pick the date", "Choose the holiday date first.");
+      save({ p_add: { day: d.value, name: n.value, branches: Object.keys(pick) } }, "Holiday added");
+    } })));
+  return c;
+}
+
 function dccCard(A, st) {
   var abc = st.dcc_abc || { a: 80, b: 95 }, tg = st.dcc_target || { A: 4, B: 2, C: 1 };
   var on = el("input", { type: "checkbox", checked: st.dcc_enabled !== false });
+  var mn = el("input", { type: "number", min: 1, max: 50, value: st.dcc_min_skus == null ? 10 : st.dcc_min_skus, style: "width:80px" });
   var ia = el("input", { type: "number", min: 1, max: 98, value: abc.a, style: "width:80px" }), ib = el("input", { type: "number", min: 2, max: 99, value: abc.b, style: "width:80px" });
   var tA = el("input", { type: "number", min: 1, max: 31, value: tg.A, style: "width:70px" }), tB = el("input", { type: "number", min: 1, max: 31, value: tg.B, style: "width:70px" }), tC = el("input", { type: "number", min: 1, max: 31, value: tg.C, style: "width:70px" });
   var c = el("div", { class: "card" }, el("h3", { text: "Daily cycle count" }),
     el("label", { class: "row", style: "gap:8px" }, on, el("span", { text: "Daily counts on (each warehouse gets a short list every working day once daily stock is uploaded)" })),
     el("p", { class: "small muted", style: "margin-top:10px", text: "ABC per warehouse, worked out on the 1st of each month from the latest daily stock: SKUs sorted by stock value; A = SKUs that make up the first A% of value, B = up to B%, C = the rest." }),
     el("div", { class: "row" }, el("span", { class: "small", text: "A up to" }), ia, el("span", { class: "small", text: "% · B up to" }), ib, el("span", { class: "small", text: "%" })),
+    el("p", { class: "small muted", style: "margin-top:10px", text: "KPI001: a working day passes only when the count is submitted the same day with at least this many SKUs counted. The daily list always has at least this many SKUs (all SKUs if a warehouse has fewer)." }),
+    el("div", { class: "row" }, el("span", { class: "small", text: "Minimum SKUs a day" }), mn),
     el("p", { class: "small muted", style: "margin-top:10px", text: "How often each class is counted per month. The daily list spreads what is still due over the remaining working days." }),
     el("div", { class: "row" }, el("span", { class: "small", text: "A" }), tA, el("span", { class: "small", text: "× · B" }), tB, el("span", { class: "small", text: "× · C" }), tC, el("span", { class: "small", text: "× per month" })),
     el("div", { class: "row", style: "justify-content:flex-end;margin-top:8px" }, el("button", { class: "btn primary", text: "Save rules", onclick: function () {
-      call("admin_settings", { p_patch: { dcc_enabled: on.checked, dcc_abc: { a: Number(ia.value), b: Number(ib.value) }, dcc_target: { A: Number(tA.value), B: Number(tB.value), C: Number(tC.value) } } }, "Daily count rules saved. New ABC limits apply from next month's classification.").catch(function () { });
+      call("admin_settings", { p_patch: { dcc_enabled: on.checked, dcc_abc: { a: Number(ia.value), b: Number(ib.value) }, dcc_target: { A: Number(tA.value), B: Number(tB.value), C: Number(tC.value) }, dcc_min_skus: Number(mn.value) } }, "Daily count rules saved. New ABC limits apply from next month's classification.").catch(function () { });
     } })));
   var t = el("table", {}, el("tr", {}, ["Warehouse", "Working days", "Count window", "Supervisor PIN", ""].map(function (h) { return el("th", { text: h }); })));
   (A.branches || []).filter(function (b) { return b.active; }).forEach(function (b) {

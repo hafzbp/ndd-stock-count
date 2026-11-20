@@ -42,6 +42,9 @@ main{max-width:1200px;margin:0 auto;padding:16px}
 .card{margin-bottom:12px}.card h3{font-size:15px;margin:0 0 8px}
 .tw{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}th{color:var(--mute);font-weight:600}.n{text-align:right;font-variant-numeric:tabular-nums}
 .sec{font-size:17px;margin:18px 0 10px}
+.banner{border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:13.5px}.banner.warn{background:var(--warnbg);color:var(--warn)}
+select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink)}
+.pill.ok{background:var(--okbg);color:var(--ok)}.pill.bad{background:var(--badbg);color:var(--bad)}
 </style>
 </head>
 <body>
@@ -52,7 +55,7 @@ main{max-width:1200px;margin:0 auto;padding:16px}
   <span class="pill" id="live">…</span>
   <a href="../" style="margin-left:8px;color:inherit;font-size:13px;white-space:nowrap">← Counting app</a>
 </header>
-<main id="app"><section id="dcc"><div class="center muted">Loading…</div></section><section id="monthly"></section></main>
+<main id="app"><section id="kpi"></section><section id="dcc"><div class="center muted">Loading…</div></section><section id="monthly"></section></main>
 <script type="module" src="dash.js"></script>
 </body>
 </html>

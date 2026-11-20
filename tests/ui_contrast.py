@@ -51,6 +51,7 @@ with sync_playwright() as p:
     ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('Create')"); ow.click(SB("Create")); ow.wait_for_selector("#sheet >> text=PIN:")
     pin = ow.inner_text("#sheet").split("PIN: ")[1][:6]; audit(ow, "modal PIN"); ow.click(SB("OK"))
     ow.click("#tabs button:text-is('Dashboard')"); ow.wait_for_selector("text=Compliance · warehouse × day"); audit(ow, "dashboard admin")
+    ow.click("button.chip:has-text('Demo data')"); ow.wait_for_selector("text=Made-up numbers"); ow.wait_for_timeout(300); audit(ow, "dashboard KPI demo"); ow.click("button.chip:has-text('Demo data')"); ow.wait_for_timeout(300)
     ow.click("#tabs button:text-is('Master')"); ow.wait_for_timeout(800); audit(ow, "master")
     op = page(390, 844); op.goto(BASE + "/?api=local"); op.wait_for_selector("text=Enter your warehouse plant code"); audit(op, "counter plant code")
     for d in "1501": op.click(f".pad button:text-is('{d}')")

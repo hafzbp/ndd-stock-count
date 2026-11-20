@@ -1,7 +1,8 @@
 /* Public live dashboard: no login. What it shows is set by Finance in Setup → Public dashboard. */
 import { rpc } from "../js/api.js";
 import { el, fmt, tsTxt } from "../js/ui.js";
-import { renderDccStats } from "../js/dcc.js";
+import { renderDccStats, ensureDccCss } from "../js/dcc.js";
+import { renderKpi, kpiMonths, demoKpi, demoOps, KPI_CSS } from "../js/kpi.js";
 
 var $ = function (s) { return document.querySelector(s); };
 var ST = { not_started: ["Not started", ""], counting: ["Counting", "warn"], submitted: ["Submitted ✓", "ok"] };
@@ -61,13 +62,32 @@ function draw(d) {
   app.append(g);
 }
 
+/* ?demo=1 shows made-up data (client only) to present the dashboard; nothing is fetched or saved for it */
+var DEMO = /[?&]demo=1\b/.test(location.search);
+function todayKL() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kuala_Lumpur" }).format(new Date()); }
+var kpiMonth = null, kpiData = null, kpiToday = null;
+function drawKpi() {
+  var root = $("#kpi"); root.innerHTML = "";
+  if (DEMO) root.append(el("div", { class: "banner warn" }, el("b", { text: "Demo data. " }), "Made-up numbers to show how the dashboard works. Nothing here is real."));
+  renderKpi(root, { pub: true, demo: DEMO, today: kpiToday, month: kpiMonth, data: kpiData,
+    setMonth: function (m) { kpiMonth = m; kpiData = null; drawKpi(); loadKpi(); } });
+}
+async function loadKpi() {
+  kpiToday = kpiToday || todayKL(); if (!kpiMonth) kpiMonth = kpiMonths(kpiToday)[0];
+  var m = kpiMonth, d = DEMO ? demoKpi(kpiToday, m) : await rpc("public_kpi", { p_month: m });
+  if (m !== kpiMonth) return;   // the month changed while loading
+  kpiData = d; kpiToday = d.today || kpiToday; drawKpi();
+}
+
 var lastDcc = 0;
 async function loadDcc() {
-  var d = await rpc("public_dcc", {}), root = $("#dcc"); root.innerHTML = "";
+  if (Date.now() - lastDcc > 120000 || !kpiData) { try { await loadKpi(); } catch (e) { $("#kpi").innerHTML = ""; $("#kpi").append(el("div", { class: "note", text: "KPI can't load right now." })); } }
+  var t = todayKL(), d = DEMO ? Object.assign(demoOps(t, t.slice(0, 8) + "01", t).stats, { withRm: false, top: null }) : await rpc("public_dcc", {}), root = $("#dcc"); root.innerHTML = "";
   root.append(el("h2", { class: "sec", text: "Daily cycle count · this month" }));
   if (!(d.branches || []).some(function (b) { return b.universe; })) root.append(el("div", { class: "note", text: "Daily counts start after HQ uploads the first daily stock file." }));
   renderDccStats(root, d, {}); lastDcc = Date.now();
 }
+if (!document.getElementById("kpi-css")) { ensureDccCss(); document.head.append(el("style", { id: "kpi-css", text: KPI_CSS })); }
 async function load() {
   try { if (Date.now() - lastDcc > 120000) await loadDcc(); var d = await rpc("public_dashboard", {}); draw(d); $("#live").textContent = "● Live"; $("#live").className = "pill ok"; }
   catch (e) { $("#live").textContent = "Offline - retrying"; $("#live").className = "pill warn"; if (!$("#app").children.length || /Loading/.test($("#app").textContent)) $("#app").innerHTML = '<div class="center muted">Can\'t reach the server. Retrying…</div>'; }

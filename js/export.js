@@ -9,7 +9,7 @@ import { listPhotos } from "./photos.js";
 var V = new URL("../vendor/", import.meta.url).href;
 function roleName(r) { return r === "fin" ? "Finance check" : "Ops count"; }
 
-async function xlsxLib() { if (typeof XLSX === "undefined") await loadJs(V + "xlsx.full.min.js"); return window.XLSX; }
+export async function xlsxLib() { if (typeof XLSX === "undefined") await loadJs(V + "xlsx.full.min.js"); return window.XLSX; }
 async function pdfLibs() {
   if (!(window.jspdf && window.jspdf.jsPDF)) await loadJs(V + "jspdf.umd.min.js");
   if (!window.jspdf.jsPDF.API.autoTable) await loadJs(V + "jspdf.plugin.autotable.min.js");
