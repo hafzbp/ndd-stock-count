@@ -94,6 +94,11 @@ await t("draft: counters can't start yet", async () => {
 await t("factors + barcodes", async () => {
   await rpc("admin_save_skus", { p_token: ADM, p_items: [{ code: "A1", per: 24 }, { code: "B2", per: 50, perBox: 10 }, { code: "C3", per: 12 }, { code: "Z9", per: 6 }] });
   assert.equal(await rpc("admin_save_barcodes", { p_token: ADM, p_rows: [{ barcode: "8993175536707", code: "A1", uom: "PCS" }, { barcode: "x", code: "A1", uom: "BAG" }], p_replace: false }), 1);
+  // one barcode printed on two SKUs: kept with both, so the phone asks instead of guessing
+  assert.equal(await rpc("admin_save_barcodes", { p_token: ADM, p_rows: [{ barcode: "999", code: "C3", uom: "PCS" }, { barcode: "999", code: "B2", uom: "PCS" }, { barcode: "998", code: "B2", uom: "CTN" }, { barcode: "998", code: "B2", uom: "CTN" }], p_replace: false }), 2);
+  const own = (await db.query("select token from public.tokens where kind = 'owner' limit 1")).rows[0].token;
+  const m = await rpc("counter_master", { p_token: own });
+  assert.deepEqual(m.barcodes["999"].alts, ["B2", "C3"]); assert.equal(m.barcodes["998"].alts, undefined); assert.equal(m.barcodes["8993175536707"].code, "A1");
 });
 await t("open counting; can't start another stock take while open", async () => {
   const o = await rpc("admin_set_status", { p_token: ADM, p_status: "open" }); assert.equal(o.status, "open");
@@ -185,6 +190,21 @@ await t("close: counters blocked, admin not; dashboard shows variance by level",
   assert.equal(d.showVariance, true); assert.equal(a.variance.varRM, null);
   await rpc("admin_settings", { p_token: ADM, p_patch: { dash_level: "value" } });
   d = await rpc("public_dashboard", {}); a = d.branches.find((b) => b.branch === "NDD Alpha"); assert.ok(a.variance.varRM != null);
+});
+await t("counts reaching the server after close are parked for HQ, not lost", async () => {
+  const extra = Object.assign({}, opsLines, { "C3|2026-12": L("C3", "2026-12", 3, null, 0) });
+  const r = await rpc("counter_save", { p_token: TA, p_device: DEV1, p_id: SO.id, p_data: { member: "Ali", lines: extra } });
+  assert.equal(r.ok, false); assert.equal(r.closed, true); assert.equal(r.late, true);
+  let late = await rpc("admin_late", { p_token: ADM }); assert.equal(late.length, 1); assert.equal(late[0].branch, "NDD Alpha"); assert.ok(late[0].lines >= 1);
+  await rejects(rpc("admin_late", { p_token: TA }), /./);
+  await rpc("admin_late_resolve", { p_token: ADM, p_session: SO.id, p_take: true });
+  const a = await rpc("admin_load", { p_token: ADM }); assert.equal(a.sessions.find((x) => x.id === SO.id).data.lines["C3|2026-12"].ctn, 3);
+  assert.equal((await rpc("admin_late", { p_token: ADM })).length, 0);
+  // the same save again is no longer different: nothing parked
+  assert.equal((await rpc("counter_save", { p_token: TA, p_device: DEV1, p_id: SO.id, p_data: { member: "Ali", lines: extra } })).late, false);
+  await rpc("counter_save", { p_token: TA, p_device: DEV1, p_id: SO.id, p_data: { member: "Ali", lines: opsLines } });
+  await rpc("admin_late_resolve", { p_token: ADM, p_session: SO.id, p_take: false });
+  assert.equal((await rpc("admin_load", { p_token: ADM })).sessions.find((x) => x.id === SO.id).data.lines["C3|2026-12"].ctn, 3);
 });
 await t("reopen and close again", async () => {
   assert.equal((await rpc("admin_set_status", { p_token: ADM, p_status: "open" })).status, "open");

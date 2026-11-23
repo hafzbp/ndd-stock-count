@@ -77,6 +77,15 @@ function shrink(file, lines) {
   });
 }
 
+/* The photo count lives on the session object, but a background sync can swap that object for a fresh copy from the
+   server (which may not include an upload that just finished). Keep this phone's own count in S.photoN and write it
+   to whichever object is live now. */
+function setN(m, n) {
+  S.photoN = S.photoN || {}; S.photoN[m.id] = n; m.photos = n;
+  var live = S.mine.sessions[m.id]; if (live) live.photos = n;
+  backup();
+}
+
 export async function listPhotos(sessionId, token) {
   var r = await fn("photos", { action: "list", token: token, device: S.device, session_id: sessionId });
   cache[sessionId] = r.photos || [];
@@ -125,7 +134,7 @@ export function photoBlock(m, locked, onChange) {
       var data = await shrink(file, stampLines({ at: at, pos: pos, addr: addr, who: who }));
       var r = await fn("photos", { action: "upload", token: tokenFor(m.branch), device: S.device, session_id: m.id, image: data.split(",")[1] });
       (cache[m.id] = cache[m.id] || []).push(r.photo);
-      m.photos = (cache[m.id] || []).length; backup();
+      setN(m, cache[m.id].length);
     } catch (e) { err.textContent = e.code === "OFFLINE" ? "No connection - photo not sent. Try again when online." : errText(e); }
     pending--; draw(); onChange && onChange();
   });
@@ -133,14 +142,14 @@ export function photoBlock(m, locked, onChange) {
     try {
       await fn("photos", { action: "delete", token: tokenFor(m.branch), device: S.device, photo_id: p.id });
       cache[m.id] = (cache[m.id] || []).filter(function (x) { return x.id !== p.id; });
-      m.photos = cache[m.id].length; backup(); draw(); onChange && onChange();
+      setN(m, cache[m.id].length); draw(); onChange && onChange();
     } catch (e) { err.textContent = errText(e); }
   }
   wrap.append(info, locked ? null : where, grid, locked ? null : el("div", { class: "row", style: "margin-top:8px" }, cam), inCam, err);
   if (!locked && count() < max) locate().then(draw);   /* ask for location once, before the first photo */
   draw();
   if (!cache[m.id] || cache[m.id].length !== (m.photos || 0)) {
-    listPhotos(m.id, tokenFor(m.branch)).then(function () { m.photos = count(); draw(); onChange && onChange(); }, function (e) { if (m.photos) err.textContent = "Can't load photos: " + errText(e); });
+    listPhotos(m.id, tokenFor(m.branch)).then(function () { setN(m, count()); draw(); onChange && onChange(); }, function (e) { if (m.photos) err.textContent = "Can't load photos: " + errText(e); });
   }
   return wrap;
 }

@@ -1,5 +1,5 @@
 /* App shell: start-up, header, tabs, admin/owner login, sync loop, in-app browser screen. */
-import { S, hooks, loadLocal, saveTokens, sync, flush, syncPill, cur, isAdmin, isOwner, anyDirty, backup } from "./state.js";
+import { S, hooks, loadLocal, saveTokens, sync, flush, syncPill, cur, isAdmin, isOwner, anyDirty, backup, tabGuard } from "./state.js";
 import { rpc } from "./api.js";
 import { $, el, pill, msg, openModal, closeModal, errText, labelTables, confirmBox, toast } from "./ui.js";
 import { renderCount, withPin, loadMaster, loadBranch, roleName, kindShort } from "./count.js";
@@ -190,6 +190,14 @@ async function init() {
   if (/[?&]api=/.test(location.search)) $("#dashBtn").href = "dashboard/" + location.search;
   $("#modal").addEventListener("click", function (e) { if (e.target.id === "modal" && !e.target.classList.contains("lock")) closeModal(); });
   loadLocal(); loadSupTok();
+  tabGuard(function () {
+    closeModal();
+    openModal(function (sh) {
+      sh.append(el("h3", { text: "Open in another tab" }),
+        el("p", { class: "muted", text: "The app was opened again in another tab or window on this phone. Count in ONE tab only, otherwise counts overwrite each other. This tab has stopped saving - your counts so far are safe." }),
+        el("button", { class: "btn primary block", text: "Use this tab instead", onclick: function () { location.reload(); } }));
+    }, "lock");
+  });
   try { var c = localStorage.getItem("ndd2-cfg"); if (c) S.cfg = JSON.parse(c); } catch (e) { }
   if (S.cfg) render();
   var ok = await refreshCfg();

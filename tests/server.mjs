@@ -79,7 +79,7 @@ async function photos(body) {
       if (s.status !== "counting" && !admin) return [400, { error: "This count is submitted." }];
       files.delete(p.path); await q(`delete from public.session_photos where id = $1`, [p.id]); return [200, { ok: true }];
     }
-    if (body.action === "remove_paths") { if (tok.kind !== "owner") return [403, { error: "AUTH: owner login needed" }]; (body.paths || []).forEach((p) => files.delete(p)); return [200, { ok: true }]; }
+    if (body.action === "remove_paths") { if (tok.kind !== "owner" && tok.kind !== "finance") return [403, { error: "AUTH: admin login needed" }]; (body.paths || []).forEach((p) => files.delete(p)); return [200, { ok: true }]; }
     return [400, { error: "Unknown action" }];
   } catch (e) { return [/^AUTH/.test(e.message) ? 403 : 400, { error: e.message }]; }
 }

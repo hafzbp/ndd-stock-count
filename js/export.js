@@ -167,9 +167,11 @@ export async function signoffPdf(b) {
   d.setFont("helvetica", "normal"); d.setFontSize(8.5); d.setTextColor(110); d.text("Stock count sign-off", lx, 19); d.setTextColor(0);
   d.setDrawColor(181, 18, 27); d.setLineWidth(0.6); d.line(14, 23, W - 14, 23); d.setLineWidth(0.2); d.setDrawColor(0); y = 31;
   d.setFont("helvetica", "bold"); d.setFontSize(15); d.text(title + " - Count Sign-off" + (tk.stockType === "bad" ? " - BAD STOCK" : ""), 14, y); y += 7;
-  d.setFontSize(12); d.text(b + (tk.name ? "  ·  " + tk.name : ""), 14, y); d.setFont("helvetica", "normal"); d.setFontSize(9);
+  /* warehouse + stock take name on their own line (wrapped if long), dates on the next - a long name used to run into the dates */
+  d.setFontSize(12); var hl = d.splitTextToSize(b + (tk.name ? "  ·  " + tk.name : ""), W - 28); d.text(hl, 14, y); y += 5.2 * hl.length;
+  d.setFont("helvetica", "normal"); d.setFontSize(9);
   var subs = ses.map(function (x) { return x.submittedAt || ""; }).filter(Boolean).sort();
-  d.text("Count submitted: " + (subs.length ? tsTxt(subs[0]) + (subs.length > 1 ? " to " + tsTxt(subs[subs.length - 1]) : "") : "-") + "     Generated: " + tsTxt(nowIso()), W - 14, y, { align: "right" }); y += 5;
+  d.text("Count submitted: " + (subs.length ? tsTxt(subs[0]) + (subs.length > 1 ? " to " + tsTxt(subs[subs.length - 1]) : "") : "-") + "     Generated: " + tsTxt(nowIso()), 14, y); y += 5;
   if (!final) { d.setTextColor(200, 0, 0); d.setFont("helvetica", "bold"); d.text("DRAFT - not final: " + (!allSub ? "not all counts submitted. " : "") + (open ? open + " line(s) still RECOUNT / WAITING." : ""), 14, y); d.setTextColor(0); d.setFont("helvetica", "normal"); y += 5; }
   if (tk.scope === "partial") { d.setFont("helvetica", "bold"); d.text("Partial count: " + tk.skuCount + " picked SKU(s) only.", 14, y); d.setFont("helvetica", "normal"); y += 5; }
   d.text("Quantities in PCS. " + (sg ? "Single count: one team counted; its count is the agreed count." : "Double count: Operations and Finance counted separately; only MATCH lines are agreed.") + (tk.stockType === "bad" ? " System = SAP MB52 bad-stock locations BS00, BS01, SH00 only (good and blocked stock excluded)." : " System = SAP MB52 good stock (bad/blocked excluded).") + " Tolerance ±" + tolPct() + "% per SKU.", 14, y, { maxWidth: W - 28 }); y += 9;

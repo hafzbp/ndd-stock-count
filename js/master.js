@@ -7,7 +7,9 @@ import { exportXlsx, signoffPdf } from "./export.js";
 import { showGallery } from "./photos.js";
 
 export async function loadAdmin() {
-  var r = await rpc("admin_load", { p_token: S.admin.token, p_take: S.viewTake || null });
+  var res = await Promise.all([rpc("admin_load", { p_token: S.admin.token, p_take: S.viewTake || null }),
+    rpc("admin_late", { p_token: S.admin.token, p_take: S.viewTake || null }).catch(function () { return []; })]);
+  var r = res[0]; S.late = res[1] || [];
   S.adm = r;
   S.admin.kind = r.kind;
   S.counts = docsFrom(r.sessions);

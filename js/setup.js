@@ -61,7 +61,7 @@ export function mb52Card(title, onDone, opts) {
         (res.transit ? "\nStock in transit left out: " + fmt(res.transit, 0) + " PCS" : "") + (res.format === "mb52" ? (BAD ? "\nBad stock only (locations BS00, BS01, SH00). Good stock left out: " + fmt(res.totQ, 0) + " PCS." : "\nGood stock only. Left out: blocked stock " + fmt(res.exBlkQ, 0) + " PCS (RM " + fmt(res.exBlkV, 2) + "), bad-stock locations BS/SH " + fmt(res.exBadQ, 0) + " PCS (RM " + fmt(res.exBadV, 2) + ")" + (opts.daily && res.badLines ? " - kept apart for bad-stock counts" : "") + ".") : "") +
         (missingPicked.length ? "\n\n" + missingPicked.length + " picked SKU(s) are not in this MB52 at any branch: " + missingPicked.slice(0, 8).join(", ") : "") +
         (res.format === "report" ? "\n\nStock report format (SKU / Total in PCS). " + (res.hasValue ? "" : "It has no RM values, so variance shows in PCS only.") : "") +
-        (opts.daily ? "\n\nThis becomes the system stock dated " + opts.daily.date() + " for daily counts." : "\n\nReplaces system stock for these branches."), "Load", async function () {
+        (opts.daily ? "\n\nThis becomes the system stock dated " + opts.daily.date() + " for daily counts." : "\n\nReplaces system stock for these branches.") + replaceWarn(opts), "Load", async function () {
           var skV = 0; Object.keys(res.skipped).forEach(function (k) { skV += res.skipped[k]; });
           pill("Loading MB52…");
           try {
@@ -82,9 +82,13 @@ export function mb52Card(title, onDone, opts) {
 function askNewBranches(list) {
   return new Promise(function (done) {
     openModal(function (sh) {
-      var boxes = list.map(function (x) { var cb = el("input", { type: "checkbox", checked: /^NDD/i.test(x.name) }); cb._n = x.name; return cb; });
+      /* first setup: pre-tick the NDD names. Once warehouses exist, a new name is more often one that was removed on purpose
+         (NDD Perak moved to a distributor), so nothing is ticked and HQ decides. */
+      var first = !((S.adm && S.adm.branches) || []).length;
+      var boxes = list.map(function (x) { var cb = el("input", { type: "checkbox", checked: first && /^NDD/i.test(x.name) }); cb._n = x.name; return cb; });
       sh.append(el("h3", { text: "New branches in this MB52" }),
-        el("p", { class: "small muted", text: "These “Name 1” values are not in the app yet. Tick the ones that are NDD warehouses to count - their plant code becomes the counters' login. Unticked ones are skipped and won't be asked about again." }),
+        el("p", { class: "small muted", text: "These “Name 1” values are not in the app yet. Tick only a NEW warehouse that will count - its plant code becomes the counters' login. Unticked ones are skipped (their stock is left out) and won't be asked about again." }),
+        first ? null : el("div", { class: "banner warn small", text: "Nothing is ticked: a name here is usually a warehouse that was removed on purpose. Tick it only if it really counts this time." }),
         el("div", { style: "max-height:50vh;overflow:auto;margin:8px 0" }, list.map(function (x, i) { return el("label", { class: "row", style: "gap:8px;padding:6px 0;border-bottom:1px solid var(--line)" }, boxes[i], el("span", { text: x.name }), el("span", { class: "small muted", text: "plant " + x.plant })); })),
         el("div", { class: "row", style: "margin-top:12px" },
           el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: function () { closeModal(); done(null); } }),
@@ -92,6 +96,24 @@ function askNewBranches(list) {
     });
   });
 }
+
+/* Replacing the monthly MB52 after counting started: counts stay, but variance and the KPI move to the new stock. */
+function replaceWarn(opts) {
+  if (opts.daily) return "";
+  var t = currentTake(), started = (S.counts || []).filter(function (d) { return Object.keys(d.lines || {}).length; }).length;
+  if (!t || t.status === "draft" || !started) return "";
+  return "\n\n⚠ COUNTING IS " + String(t.status).toUpperCase() + ": " + started + " count(s) already have lines. They are kept, but the variance, KPI and sign-offs will compare them with THIS file. Only do this if the earlier MB52 was wrong (and tell the warehouses if a SKU/batch list changed).";
+}
+
+/* Settings re-renders when its data finishes loading (holidays, regions, a save elsewhere). Keep what was typed or
+   pasted in a text box across those re-renders, until it is saved. */
+function keep(box, key) {
+  S.drafts = S.drafts || {};
+  if (S.drafts[key]) box.value = S.drafts[key];
+  box.addEventListener("input", function () { S.drafts[key] = box.value; });
+  return box;
+}
+function dropDraft(key) { if (S.drafts) delete S.drafts[key]; }
 
 function card(title, sub) { var c = el("div", { class: "card" }, el("h3", { text: title }), sub ? el("p", { class: "small muted", text: sub }) : null); return c; }
 
@@ -103,7 +125,7 @@ export function renderSetup(app) {
   app.append(warehousesCard(A), dccCard(A, st), holidayCard(A));
 
   /* 2. factors */
-  var fa = el("textarea", { placeholder: "Item Code\tPcs per CTN\tPcs per BOX\n650505\t240\t24" });
+  var fa = keep(el("textarea", { placeholder: "Item Code\tPcs per CTN\tPcs per BOX\n650505\t240\t24" }), "factors");
   var missing = (A.skus || []).filter(function (s) { return !s.per; }).length;
   app.append(el("div", { class: "card" }, el("h3", { text: "Pcs per Carton / Box" }),
     el("p", { class: "small muted", text: "Paste from Excel: Item Code | Pcs per CTN | Pcs per BOX. " + missing + " of " + (A.skus || []).length + " SKUs have no Pcs per CTN yet. Without it, cartons can't be converted to PCS for variance." }), fa,
@@ -114,7 +136,7 @@ export function renderSetup(app) {
         var a = numv(p[1]), b = numv(p[2]), it = { code: p[0] }; if (a > 0) it.per = a; if (b > 0) it.perBox = b; items.push(it); if (!known[p[0]]) unk.push(p[0]);
       });
       if (!items.length) { msg("Nothing to save", "Paste 3 columns from Excel first."); return; }
-      call("admin_save_skus", { p_items: items }, items.length + " SKU(s) updated." + (unk.length ? " Added new: " + unk.slice(0, 10).join(", ") : "")).then(function () { fa.value = ""; });
+      call("admin_save_skus", { p_items: items }, items.length + " SKU(s) updated." + (unk.length ? " Added new: " + unk.slice(0, 10).join(", ") : "")).then(function () { fa.value = ""; dropDraft("factors"); });
     } }))));
 
   /* 3. barcodes */
@@ -130,7 +152,9 @@ export function renderSetup(app) {
       var rows = await readSheet(file), p = parseBarcodeRows(rows);
       var skuSet = {}; (A.skus || []).forEach(function (s) { skuSet[s.code] = 1; });
       var unknownSku = p.rows.filter(function (r) { return !skuSet[r.code]; });
-      confirmBox("Load barcodes?", p.rows.length + " barcode(s) ready." + (p.bad.length ? "\n" + p.bad.length + " row(s) skipped: " + p.bad.slice(0, 6).join("; ") : "") + (unknownSku.length ? "\n" + unknownSku.length + " barcode(s) point to an Item Code not in the SKU list (e.g. " + unknownSku.slice(0, 3).map(function (r) { return r.code; }).join(", ") + ") - they load anyway." : "") + (rep.checked ? "\n\nREPLACES the current " + A.barcodeCount + " barcode(s)." : ""), "Load", function () {
+      var per = {}; p.rows.forEach(function (r) { (per[r.barcode] = per[r.barcode] || {})[r.code] = 1; });
+      var multi = Object.keys(per).filter(function (b) { return Object.keys(per[b]).length > 1; });
+      confirmBox("Load barcodes?", p.rows.length + " barcode(s) ready." + (multi.length ? "\n" + multi.length + " barcode(s) are on more than one SKU (e.g. " + multi[0] + " → " + Object.keys(per[multi[0]]).join(", ") + "). Scanning one of these asks the counter which SKU it is." : "") + (p.bad.length ? "\n" + p.bad.length + " row(s) skipped: " + p.bad.slice(0, 6).join("; ") : "") + (unknownSku.length ? "\n" + unknownSku.length + " barcode(s) point to an Item Code not in the SKU list (e.g. " + unknownSku.slice(0, 3).map(function (r) { return r.code; }).join(", ") + ") - they load anyway." : "") + (rep.checked ? "\n\nREPLACES the current " + A.barcodeCount + " barcode(s)." : ""), "Load", function () {
         call("admin_save_barcodes", { p_rows: p.rows, p_replace: rep.checked }, function (n) { return n + " barcode(s) saved."; });
       });
     } catch (e) { msg("Can't read file", errText(e)); }
@@ -261,12 +285,12 @@ function renderTeam(app) {
     var lost = rows.filter(function (r) { return bl.indexOf(r.branch) < 0; });
     if (lost.length) box.append(el("p", { class: "small", style: "color:var(--bad)", text: "Not in a branch: " + lost.map(function (r) { return r.name; }).join(", ") + " - remove or move them." }));
   }
-  var paste = el("textarea", { placeholder: "Paste 3 columns from Excel: Name | Branch | Role (Counter / Checker)", style: "min-height:70px" });
+  var paste = keep(el("textarea", { placeholder: "Paste 3 columns from Excel: Name | Branch | Role (Counter / Checker)", style: "min-height:70px" }), "team");
   var pasteBox = el("div", { class: "hidden", style: "margin-top:6px" }, paste, el("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" }, el("button", { class: "btn", text: "Replace team with pasted list", onclick: function () {
     var tm = paste.value.split(/\r?\n/).map(function (x) { var q = x.split("\t"); var ro = (q[2] || "").trim().toLowerCase(); return { name: (q[0] || "").trim(), branch: (q[1] || "").trim(), role: /count|ops|oper/.test(ro) ? "Counter" : "Checker" }; }).filter(function (x) { return x.name; });
     if (!tm.length) { msg("Nothing to paste", "Copy the 3 columns from Excel first."); return; }
     var bl = brList(), bad = tm.filter(function (x) { return bl.indexOf(x.branch) < 0; }); if (bad.length) { msg("Branch not in list", bad.map(function (x) { return x.name + " → " + x.branch; }).join(", ")); return; }
-    rows = tm; paste.value = ""; pasteBox.classList.add("hidden"); saveTeam(function () { draw(); msg("Saved", tm.length + " people."); });
+    rows = tm; paste.value = ""; dropDraft("team"); pasteBox.classList.add("hidden"); saveTeam(function () { draw(); msg("Saved", tm.length + " people."); });
   } })));
   draw();
   app.append(el("div", { class: "card" }, el("h3", { text: "Team (optional)" }),

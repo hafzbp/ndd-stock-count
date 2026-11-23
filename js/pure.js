@@ -76,7 +76,7 @@ export function parseMB52(rows, branches, plantMap) {
     A.q += q; A.v += val; if (!isBad) n++; if (slc) A.sl[slc] = 1;
   }
   function group(G) {
-    var out = {}; Object.keys(G).forEach(function (k) { var A = G[k]; (out[A.br] = out[A.br] || []).push([A.code, A.b, Math.round(A.q * 1000) / 1000, A.q ? Math.round(A.v / A.q * 1e6) / 1e6 : 0, Object.keys(A.sl).sort().join(",")]); });
+    var out = {}; Object.keys(G).forEach(function (k) { var A = G[k], q3 = Math.round(A.q * 1000) / 1000; (out[A.br] = out[A.br] || []).push([A.code, A.b, q3, q3 ? A.v / q3 : 0, Object.keys(A.sl).sort().join(",")]); });
     Object.keys(out).forEach(function (b) { out[b].sort(function (x, y) { return (x[0] + x[1]).localeCompare(y[0] + y[1]); }); });
     return out;
   }

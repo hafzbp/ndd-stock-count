@@ -119,7 +119,7 @@ export function renderCount(app) {
   else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + "." }));
   /* warehouse photos come first: a blocking step before counting starts */
   var prG = photoNeed(m);
-  if (!locked && !isAdmin() && prG.on && prG.min && (m.photos || 0) < prG.min && !(S.photoLater || {})[m.id] && !$("#modal").classList.contains("on")) setTimeout(function () { photoGate(m); }, 0);
+  if (!locked && !isAdmin() && prG.on && prG.min && Math.max(m.photos || 0, (S.photoN || {})[m.id] || 0) < prG.min && !(S.photoLater || {})[m.id] && !$("#modal").classList.contains("on")) setTimeout(function () { photoGate(m); }, 0);
   var nRc = Object.keys(rcMap()).length;
   var inSys = {}; (bd.codes || []).forEach(function (c) { inSys[c] = 1; });
   var skus = (S.skus || []).slice().sort(function (a, b) { return ((rcSku(a.code) ? 0 : 1) - (rcSku(b.code) ? 0 : 1)) || ((inSys[a.code] ? 0 : 1) - (inSys[b.code] ? 0 : 1)) || a.code.localeCompare(b.code); });
@@ -289,7 +289,7 @@ function photoGate(m) {
     var off = el("div", { class: "small", style: "margin-top:10px;display:none" }, el("span", { class: "muted", text: "No signal here? " }),
       el("button", { class: "link strong", text: "Count first, take photos before submitting", onclick: function () { S.photoLater = S.photoLater || {}; S.photoLater[m.id] = 1; closeModal(); hooks.render(); } }));
     function upd() {
-      var n = m.photos || 0; go.disabled = n < pr.min;
+      var live = S.mine.sessions[m.id] || m, n = Math.max(live.photos || 0, (S.photoN || {})[m.id] || 0); go.disabled = n < pr.min;
       go.textContent = n < pr.min ? (pr.min - n) + " more photo" + (pr.min - n > 1 ? "s" : "") + " needed" : "Start counting";
       go.className = "btn block big1" + (n < pr.min ? "" : " primary");
       off.style.display = navigator.onLine === false ? "" : "none";

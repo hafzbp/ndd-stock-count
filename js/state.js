@@ -35,7 +35,19 @@ export function loadLocal() {
   var mc = ls("ndd2-master"); if (mc) { S.skus = mc.skus; S.barcodes = mc.barcodes || {}; S.team = mc.team || []; }
   var bc = ls("ndd2-br"); if (bc) S.br = bc;
 }
-export function backup() { ls("ndd2-mine", S.mine); }
+export function backup() { if (!S.tabDead) ls("ndd2-mine", S.mine); }
+
+/* The same phone with the app open in two tabs (WhatsApp link tapped twice): each tab sends its whole count,
+   so the tabs overwrite each other. The newest tab wins; older ones stop saving and say so. */
+export function tabGuard(onLost) {
+  if (typeof BroadcastChannel === "undefined") return;
+  var ch = new BroadcastChannel("ndd2-tab"), me = Math.random().toString(36).slice(2);
+  ch.onmessage = function (e) {
+    if (!e.data || e.data.hello === me || S.tabDead || isAdmin()) return;
+    S.tabDead = true; clearTimeout(S.timer); onLost();
+  };
+  ch.postMessage({ hello: me });
+}
 export function saveTokens() { ls("ndd2-tokens", S.tokens); ls("ndd2-admin", S.admin); }
 
 export function isAdmin() { return !!(S.admin && S.admin.token); }
@@ -79,10 +91,10 @@ export function applySync(res) {
     var loc = S.mine.sessions[s.id];
     if (loc && loc.dirty && s.status === "counting") {
       if (loc.status !== s.status) changed = true;
-      loc.status = s.status; loc.photos = s.photos; loc.submittedAt = s.submittedAt;
+      loc.status = s.status; loc.photos = Math.max(s.photos || 0, (S.photoN || {})[s.id] || 0); loc.submittedAt = s.submittedAt;
       return;
     }
-    var n = fromServer(s);
+    var n = fromServer(s); n.photos = Math.max(n.photos, (S.photoN || {})[s.id] || 0);
     if (!loc || loc.status !== n.status || loc.updatedAt !== n.updatedAt || loc.photos !== n.photos) changed = true;
     S.mine.sessions[s.id] = n;
   });
@@ -110,9 +122,10 @@ export function touch() {
   var c = cur(); if (!c) return;
   c.updatedAt = nowIso(); c.dirty = true; backup(); schedule(); syncPill();
 }
-export function schedule(ms) { clearTimeout(S.timer); S.timer = setTimeout(flush, ms == null ? 900 : ms); }
+export function schedule(ms) { if (S.tabDead) return; clearTimeout(S.timer); S.timer = setTimeout(flush, ms == null ? 900 : ms); }
 
 export async function flush() {
+  if (S.tabDead) return;
   if (S.saving) { schedule(500); return; }
   var dirty = Object.keys(S.mine.sessions).map(function (k) { return S.mine.sessions[k]; }).filter(function (x) { return x.dirty; });
   if (!dirty.length) { syncPill(); return; }
@@ -128,7 +141,11 @@ export async function flush() {
       if (!r.ok) {
         var srv = fromServer(r.session); m.dirty = false;
         if (srv.status === "submitted") { S.mine.sessions[m.id] = srv; toast("This count is submitted, it can't be changed now."); }
-        else if (r.closed) { S.mine.sessions[m.id] = srv; toast("Counting is closed."); }
+        else if (r.closed) {
+          S.mine.sessions[m.id] = srv;
+          if (r.late) msg("Counting was closed", "HQ closed counting before your last counts reached the server. They are not lost: they were sent to HQ, who decides whether to add them. Tell your admin now.");
+          else toast("Counting is closed.");
+        }
         hooks.render();
       }
       S.saveErr = null;

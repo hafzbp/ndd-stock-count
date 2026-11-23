@@ -145,6 +145,8 @@ export function openScanSheet(barcode, fromWedge) {
   wedge = !!fromWedge;
   var map = S.barcodes[barcode], m = cur();
   var learned = m && m.unknownBarcodes && m.unknownBarcodes[barcode];
+  /* the same barcode is printed on several SKUs (e.g. flavours sharing one EAN): never guess, ask which one */
+  if (map && map.alts && map.alts.length > 1) { var opts = map.alts.map(skuFor).filter(Boolean); if (opts.length > 1) return openPicker(barcode, opts, map.uom); if (opts.length === 1) return openCount(opts[0], barcode, map.uom); }
   var s = map ? skuFor(map.code) : learned ? skuFor(learned) : null;
   if (s) openCount(s, barcode, map ? map.uom : null);
   else openPicker(barcode);
@@ -233,10 +235,10 @@ function pickBatchInline(s, done) {
   var t = setInterval(function () { if (!mo.classList.contains("on")) { clearInterval(t); if (hold) hold.style.visibility = ""; } }, 200);
 }
 
-function openPicker(barcode) {
+function openPicker(barcode, only, uom) {
   openSheet(function (sh) {
     var q = el("input", { type: "search", placeholder: "Search SKU code or name", "aria-label": "Search SKU" }), list = el("div");
-    var all = Object.keys(S.skuIndex || {}).map(function (k) { return S.skuIndex[k]; });
+    var all = only || Object.keys(S.skuIndex || {}).map(function (k) { return S.skuIndex[k]; });
     if (!all.length) all = S.skus || [];
     function draw() {
       list.innerHTML = ""; var w = q.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -244,17 +246,18 @@ function openPicker(barcode) {
         .forEach(function (s) {
           list.append(el("button", { type: "button", class: "pick", onclick: function () {
             var m = cur();
-            if (barcode && m) { m.unknownBarcodes = m.unknownBarcodes || {}; m.unknownBarcodes[barcode] = s.code; touch(); }
-            closeSheet(false); setTimeout(function () { openCount(s, barcode, null); }, 280);
+            if (barcode && m && !only) { m.unknownBarcodes = m.unknownBarcodes || {}; m.unknownBarcodes[barcode] = s.code; touch(); }
+            closeSheet(false); setTimeout(function () { openCount(s, barcode, only ? uom : null); }, 280);
           } }, s.desc || s.code, el("small", { text: s.code })));
         });
     }
     q.addEventListener("input", draw);
     sh.append(
-      el("div", { class: barcode ? "unk" : "found" }, barcode ? "Barcode not registered" : "Search SKU", barcode ? el("span", { class: "muted", text: " · " + barcode }) : null),
-      el("div", { class: "skuname", text: barcode ? "Which SKU is this?" : "Pick the SKU you are counting" }),
-      barcode ? el("div", { class: "muted small", text: "Your choice is sent to your admin so they can add this barcode to the master. Next scan of this barcode on this phone goes straight to the SKU." }) : null,
-      el("div", { style: "height:10px" }), q, list,
+      el("div", { class: barcode ? "unk" : "found" }, only ? "Barcode on " + only.length + " SKUs" : barcode ? "Barcode not registered" : "Search SKU", barcode ? el("span", { class: "muted", text: " · " + barcode }) : null),
+      el("div", { class: "skuname", text: only ? "Which one is it? Check the name on the pack." : barcode ? "Which SKU is this?" : "Pick the SKU you are counting" }),
+      only ? el("div", { class: "muted small", text: "This barcode is printed on more than one SKU, so the app can't tell them apart. Pick by the product name / flavour on the pack." })
+        : barcode ? el("div", { class: "muted small", text: "Your choice is sent to your admin so they can add this barcode to the master. Next scan of this barcode on this phone goes straight to the SKU." }) : null,
+      el("div", { style: "height:10px" }), only ? null : q, list,
       el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn grow", type: "button", text: ov ? "Cancel, scan again" : "Cancel", onclick: function () { closeSheet(true); } })));
     draw(); setTimeout(function () { q.focus(); }, 300);
   });

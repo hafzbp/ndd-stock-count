@@ -74,8 +74,18 @@ Deno.serve(async (req) => {
     }
 
     if (action === "remove_paths") {
-      if (tok.kind !== "owner") return json({ error: "AUTH: owner login needed" }, 403);
-      const paths = (body.paths || []).map(String).filter((x: string) => /^[0-9a-f-]{36}\//.test(x));
+      if (!admin) return json({ error: "AUTH: admin login needed" }, 403);
+      let paths = (body.paths || []).map(String).filter((x: string) => /^[0-9a-f-]{36}\//.test(x));
+      // only files of counts that are already deleted (HQ deleted a count or reset the stock take).
+      // path = take id / branch / session id / photo.jpg
+      const sid = (x: string) => x.split("/")[2] || "";
+      const ids = [...new Set(paths.map(sid))].filter((x) => /^[0-9a-f-]{36}$/.test(x));
+      const live = new Set<string>();
+      for (let i = 0; i < ids.length; i += 100) {
+        const { data } = await db.from("count_sessions").select("id").in("id", ids.slice(i, i + 100));
+        (data || []).forEach((r: { id: string }) => live.add(r.id));
+      }
+      paths = paths.filter((x: string) => /^[0-9a-f-]{36}$/.test(sid(x)) && !live.has(sid(x)));
       for (let i = 0; i < paths.length; i += 100) await db.storage.from(BUCKET).remove(paths.slice(i, i + 100));
       return json({ ok: true, removed: paths.length });
     }

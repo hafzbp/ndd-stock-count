@@ -197,6 +197,47 @@ function readyTable() {
   return el("div", { class: "tw keep", style: "margin-top:10px" }, t);
 }
 
+
+/* ---------------- Things HQ must decide before trusting the result ---------------- */
+/* Counts that reached the server after counting closed (the phone was offline). */
+function lateCard() {
+  var L = S.late || []; if (!L.length) return null;
+  var c = el("div", { class: "card", style: "border-color:var(--warn)" }, el("h3", { text: "⚠ Counts that arrived after closing" }),
+    el("p", { class: "small muted", text: "These phones were offline when counting closed. Their last counts are NOT in the result yet. Take them in (the result, Excel and sign-offs update) or ignore them." }));
+  L.forEach(function (x) {
+    var who = x.branch + " · " + (x.role === "fin" ? "Finance" : "Ops") + (x.member ? " · " + x.member : "");
+    c.append(el("div", { class: "wrow" }, el("div", { class: "grow" }, el("b", { text: who }),
+      el("div", { class: "small muted", text: x.lines + " line(s) new or changed" + (x.removed ? ", " + x.removed + " removed" : "") + " · sent " + tsTxt(x.at) })),
+      el("div", { class: "row", style: "gap:6px" },
+        el("button", { class: "btn primary", text: "Take in", onclick: function () { resolveLate(x, true); } }),
+        el("button", { class: "btn", text: "Ignore", onclick: function () { resolveLate(x, false); } }))));
+  });
+  return c;
+}
+function resolveLate(x, take) {
+  confirmBox(take ? "Take these counts in?" : "Ignore these counts?", take ? "The count of " + x.branch + " (" + (x.role === "fin" ? "Finance" : "Ops") + ") is replaced with what the phone sent. Download the sign-off again afterwards." : "What the phone sent after closing is dropped. The result stays as it is.", take ? "Take in" : "Ignore", async function () {
+    try { await rpc("admin_late_resolve", { p_token: tok(), p_session: x.session, p_take: take }); await loadAdmin(); hooks.render(); toast(take ? "Counts taken in" : "Ignored"); } catch (e) { msg("Failed", errText(e)); }
+  });
+}
+/* Two phones of the same team in one warehouse that both counted the same batch: the app adds them up.
+   Fine when each counted a different pallet, wrong when they counted the same one twice. */
+export function overlaps() {
+  var by = {};
+  (S.counts || []).forEach(function (d) {
+    Object.keys(d.lines || {}).forEach(function (k) { if (!hasQty(d.lines[k])) return; var g = d.branch + "|" + d.role; ((by[g] = by[g] || {})[k] = by[g][k] || []).push(d.member || "?"); });
+  });
+  var out = [];
+  Object.keys(by).forEach(function (g) { var n = Object.keys(by[g]).filter(function (k) { return by[g][k].length > 1; }); if (n.length) { var p = g.split("|"); out.push({ branch: p[0], role: p[1], n: n.length, keys: n, who: by[g][n[0]] }); } });
+  return out;
+}
+function overlapCard() {
+  var O = overlaps(); if (!O.length) return null;
+  return el("div", { class: "card", style: "border-color:var(--warn)" }, el("h3", { text: "⚠ Same batch counted on two phones" }),
+    el("p", { class: "small muted", text: "In these warehouses two phones of the same team both counted the same SKU + batch. The app ADDS them up. That is right if each counted a different stack, wrong if they counted the same stock twice - check with the warehouse." }),
+    O.map(function (o) { return el("div", { class: "wrow" }, el("div", { class: "grow" }, el("b", { text: o.branch + " · " + (o.role === "fin" ? "Finance" : "Ops") }),
+      el("div", { class: "small muted", text: o.n + " batch(es), e.g. " + o.keys.slice(0, 3).map(function (k) { return k.replace("|", " / "); }).join(", ") + " · by " + o.who.join(" + ") }))); }));
+}
+
 /* ---------------- Open ---------------- */
 function renderOpen(app, t) {
   var sg = single(t), rows = progressRows(), done = function (r) { return sg ? r.all.st === "Submitted" : r.ops.st === "Submitted" && r.fin.st === "Submitted"; }, both = rows.filter(done).length;
@@ -207,6 +248,7 @@ function renderOpen(app, t) {
       el("div", { class: "stat" }, el("b", { text: rows.filter(function (r) { return r.all.st !== "Not started"; }).length }), el("span", { text: "Started" })),
       el("div", { class: "stat" }, el("b", { text: both }), el("span", { text: sg ? "Submitted" : "Both teams submitted" })),
       el("div", { class: "stat" }, el("b", { text: rows.filter(function (r) { return r.all.st === "Not started"; }).length }), el("span", { text: "Not started" }))),
+    lateCard(), overlapCard(),
     el("div", { class: "card" }, el("h3", { text: "Progress" }), progressTable()),
     el("div", { class: "card" }, el("h3", { text: "Next" }),
       el("div", { class: "row" },
@@ -216,7 +258,7 @@ function renderOpen(app, t) {
         el("button", { class: "btn", style: "color:var(--bad)", text: "Stop & reset…", title: "Delete every count and go back to Draft", onclick: function () { resetTake(t, function () { loadAdmin().then(function () { hooks.render(); window.scrollTo(0, 0); }); }); } }),
         el("button", { class: "btn", style: "color:var(--bad)", text: "Close counting", onclick: function () {
           var open = rows.filter(function (r) { return !done(r); }).map(function (r) { return r.b; });
-          confirmBox("Close counting?", (open.length ? "Not everyone has submitted yet: " + open.join(", ") + ".\n\n" : "") + "Counters can't change anything after this. Results, Excel, sign-off PDFs and the dashboard variance use what is saved now. You can reopen later.", "Close", async function () {
+          confirmBox("Close counting?", (open.length ? "Not everyone has submitted yet: " + open.join(", ") + ".\n\n" : "") + "Counters can't change anything after this. A phone that is offline right now keeps its unsent counts; they come back here as 'counts that arrived after closing' for you to take in or ignore. Results, Excel, sign-off PDFs and the dashboard variance use what is saved now. You can reopen later.", "Close", async function () {
             try { await rpc("admin_set_status", { p_token: tok(), p_status: "closed" }); await loadAdmin(); hooks.render(); window.scrollTo(0, 0); } catch (e) { msg("Can't close", errText(e)); }
           });
         } }))));
@@ -235,6 +277,7 @@ function renderClosed(app, t) {
   tbl.append(el("tr", { class: "tot" }, el("td", { text: "TOTAL" }), el("td", { class: "n", text: tot.m }), el("td", { class: "n", text: tot.r }), el("td", { class: "n", text: tot.o }), el("td", { class: "n", text: fmt(tot.q) }), el("td", { class: "n", text: fmt(tot.v, 2) })));
   app.append(el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, el("h2", { style: "margin:0", text: t.name + (t.stockType === "bad" ? " · Bad stock" : "") }), stateTag("closed")),
     el("p", { class: "small muted", text: typeTxt(t) + " · closed " + tsTxt(t.closedAt) }),
+    lateCard(), overlapCard(),
     el("div", { class: "card" }, el("h3", { text: "Results" }), el("div", { class: "tw" }, tbl)),
     el("div", { class: "card" }, el("h3", { text: "Next" }),
       el("div", { class: "row" },
