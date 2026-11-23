@@ -45,7 +45,7 @@ export function plantPad(title, sub, wantBranch, onOk, inline) {
       var r = await rpc("plant_login", { p_code: v });
       if (!r.ok) { v = ""; draw(); err.textContent = "No warehouse with that plant code"; return; }
       if (wantBranch && r.branch !== wantBranch) { v = ""; draw(); err.textContent = "That code is for " + r.branch + ", not " + wantBranch; return; }
-      S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null; store("ndd2-last", { code: v, branch: r.branch });
+      S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null; S.lastLogin = { code: v, branch: r.branch };
       if (r.take) S.take = Object.assign({}, S.take || {}, r.take);
       if (!inline) closeModal();
       await loadMaster().catch(function () { });
@@ -116,6 +116,9 @@ export function renderCount(app) {
   }
   else if (m.status === "submitted" && !isAdmin()) app.append(doneCard(m));
   else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + "." }));
+  /* warehouse photos come first: a blocking step before counting starts */
+  var prG = photoNeed(m);
+  if (!locked && !isAdmin() && prG.on && prG.min && (m.photos || 0) < prG.min && !(S.photoLater || {})[m.id] && !$("#modal").classList.contains("on")) setTimeout(function () { photoGate(m); }, 0);
   var nRc = Object.keys(rcMap()).length;
   var inSys = {}; (bd.codes || []).forEach(function (c) { inSys[c] = 1; });
   var skus = (S.skus || []).slice().sort(function (a, b) { return ((rcSku(a.code) ? 0 : 1) - (rcSku(b.code) ? 0 : 1)) || ((inSys[a.code] ? 0 : 1) - (inSys[b.code] ? 0 : 1)) || a.code.localeCompare(b.code); });
@@ -216,7 +219,7 @@ function doneCard(m) {
     el("button", { class: "btn primary block big1", style: "background:var(--ink);border-color:var(--ink);color:var(--bg)", text: "Done · log out", onclick: function () { if (hooks.counterLogout) hooks.counterLogout(true); } }));
 }
 
-/* one SKU, full screen: every batch, steppers, total, remarks; Save & next */
+/* one SKU, full screen: every batch, steppers, total, remarks; Save & back to list (one SKU at a time, on purpose) */
 export function openSku(s) {
   var m = cur(); if (!m) return;
   S.openSku = s.code;
@@ -224,24 +227,14 @@ export function openSku(s) {
   var old = document.getElementById("skuv"); if (old) old.remove();
   var v = el("div", { id: "skuv", role: "dialog", "aria-modal": "true", "aria-label": s.desc || s.code });
   document.body.append(v); document.body.classList.add("noscroll");
-  var nav = (S.navList || []).slice(); if (nav.indexOf(s.code) < 0) nav.unshift(s.code);
-  var pos = nav.indexOf(s.code);
   function close() { S.openSku = null; v.remove(); document.body.classList.remove("noscroll"); hooks.render(); }
-  function go(code) { var x = S.skuIndex[code]; if (x) openSku(x); else close(); }
-  function nextCode() {
-    for (var i = pos + 1; i < nav.length; i++) { var x = S.skuIndex[nav[i]]; if (x && !skuDone(x)) return nav[i]; }
-    for (var j = 0; j < pos; j++) { var y = S.skuIndex[nav[j]]; if (y && !skuDone(y)) return nav[j]; }
-    return null;
-  }
   function draw() {
     v.innerHTML = "";
     var sum = skuSummary(s);
     v.append(el("div", { class: "svtop" },
       el("button", { class: "iconbtn", "aria-label": "Back to list", onclick: close }, svg(ICON.close, 22)),
-      el("span", { class: "small muted num", text: "SKU " + (pos + 1) + " of " + nav.length }),
-      el("span", { class: "row", style: "gap:0" },
-        el("button", { class: "iconbtn", "aria-label": "Previous SKU", disabled: pos <= 0, onclick: function () { go(nav[pos - 1]); } }, svg(ICON.back, 22)),
-        el("button", { class: "iconbtn", "aria-label": "Next SKU", disabled: pos >= nav.length - 1, onclick: function () { go(nav[pos + 1]); } }, svg(ICON.next, 22)))));
+      el("span", { class: "small muted", text: locked ? "Read only" : "Counts save as you type" }),
+      el("span", { style: "width:44px" })));
     var conv = []; if (s.per) conv.push("1 carton = " + fmt(s.per) + " pcs"); if (s.perBox) conv.push("1 box = " + fmt(s.perBox) + " pcs");
     var bodyEl = el("div", { class: "svbody" },
       el("div", { class: "row", style: "gap:6px" }, el("span", { class: "small muted num", text: s.code }), rcSku(s.code) ? el("span", { class: "pill bad", text: "⚠ Recount" }) : null),
@@ -260,10 +253,9 @@ export function openSku(s) {
     var foot = el("div", { class: "svfoot" });
     if (locked) foot.append(el("button", { class: "btn block big1", text: "Back to list", onclick: close }));
     else {
-      var nx = nextCode();
-      foot.append(el("button", { class: "btn primary block big1", onclick: function () { if (nx) go(nx); else close(); } }, el("span", { text: nx ? "Save & next SKU" : "Save & back to list" }), svg(ICON.arrow, 20)));
+      foot.append(el("button", { class: "btn primary block big1", onclick: function () { if (skuSummary(s)) toast("Saved: " + s.code + " · " + skuSummary(s).txt); close(); } }, el("span", { text: "Save & back to list" })));
       if (!sum) foot.append(el("button", { class: "link strong zero", text: "None on the floor (count as 0)", onclick: function () {
-        var b0 = skuBatches(s)[0] || ""; setLine(s, b0, { ctn: null, box: null, pcs: 0 }); toast(s.code + " counted as 0"); if (nx) go(nx); else close();
+        var b0 = skuBatches(s)[0] || ""; setLine(s, b0, { ctn: null, box: null, pcs: 0 }); toast(s.code + " counted as 0"); close();
       } }));
     }
     v.append(foot);
@@ -279,10 +271,42 @@ function photoModal(m, locked) {
   openModal(function (sh) {
     var pr = photoNeed(m);
     sh.append(el("h3", { text: "📷 Warehouse photos" }),
-      el("p", { class: "muted small", text: pr.on ? "Take " + pr.min + " to " + pr.max + " photos of the warehouse condition. Required before submitting." : "Optional. Up to " + pr.max + " photos." }),
+      el("p", { class: "muted small", text: pr.on ? "Take " + pr.min + " to " + pr.max + " photos of the warehouse condition. Required before counting." : "Optional. Up to " + pr.max + " photos." }),
       photoBlock(m, locked, function () { hooks.render(); }),
       el("button", { class: "btn block", style: "margin-top:12px", text: "Done", onclick: function () { closeModal(); hooks.render(); } }));
   });
+}
+
+/* Before counting: take the warehouse photos. Can't be closed until the minimum is in.
+   Only way past without photos: no connection (photos can't upload) - then they are asked again at Review & submit. */
+function photoGate(m) {
+  if ($("#modal").classList.contains("on")) return;
+  var pr = photoNeed(m);
+  openModal(function (sh) {
+    var body = el("div", {}, el("p", { class: "muted small", text: "Getting ready…" }));
+    var go = el("button", { class: "btn primary block big1", text: "Start counting", disabled: true, onclick: function () { if (go.disabled) return; closeModal(); hooks.render(); } });
+    var off = el("div", { class: "small", style: "margin-top:10px;display:none" }, el("span", { class: "muted", text: "No signal here? " }),
+      el("button", { class: "link strong", text: "Count first, take photos before submitting", onclick: function () { S.photoLater = S.photoLater || {}; S.photoLater[m.id] = 1; closeModal(); hooks.render(); } }));
+    function upd() {
+      var n = m.photos || 0; go.disabled = n < pr.min;
+      go.textContent = n < pr.min ? (pr.min - n) + " more photo" + (pr.min - n > 1 ? "s" : "") + " needed" : "Start counting";
+      go.className = "btn block big1" + (n < pr.min ? "" : " primary");
+      off.style.display = navigator.onLine === false ? "" : "none";
+    }
+    sh.append(el("div", { class: "gateic" }, "📷"), el("h3", { style: "font-size:20px", text: "First: warehouse photos" }),
+      el("p", { class: "muted small", style: "margin:0 0 6px", text: "Take " + pr.min + " to " + pr.max + " photos of the warehouse condition before you count. Camera only; each photo gets the date, time and location." }),
+      body, el("div", { style: "height:10px" }), go, off,
+      el("p", { class: "center", style: "margin:12px 0 0" }, el("button", { class: "link", text: "Wrong warehouse? Log out", onclick: function () { closeModal(); if (hooks.counterLogout) hooks.counterLogout(); } })));
+    function build() { body.innerHTML = ""; body.append(photoBlock(m, false, upd)); upd(); }
+    /* the count must be on the server before photos can attach to it */
+    var t0 = Date.now();
+    (function wait() {
+      if (!m.dirty) return build();
+      flush(); if (Date.now() - t0 > 8000) { body.innerHTML = ""; body.append(el("p", { class: "small", style: "color:var(--warn)", text: "Can't reach the server yet - check the connection." })); off.style.display = ""; setTimeout(function () { t0 = Date.now(); wait(); }, 3000); return; }
+      setTimeout(wait, 400);
+    })();
+    upd();
+  }, "lock");
 }
 
 function submitFlow(m, expected) {
@@ -382,7 +406,7 @@ function skuCard(s, locked) {
     el("button", { class: "skuh", onclick: function () { openSku(s); } },
       el("span", { class: "sbadge" + (rc ? " rc" : sum ? " ok" : "") }, rc ? "R" : sum ? svg(ICON.check, 15) : ""),
       el("span", { class: "sinfo" }, el("span", { class: "desc", text: s.desc || s.code }), el("span", { class: "code", text: s.code + (rc ? " · recount" : "") + (sum && sum.n > 1 ? " · " + sum.n + " batches" : "") })),
-      el("span", { class: "tot" + (sum ? " ok" : "") }, sum ? sum.txt : "To count")));
+      el("span", { class: "tot" + (sum ? " ok" : " todo") }, sum ? sum.txt : "To count")));
 }
 function batchRow(s, b, locked, redraw) {
   var k = lk(s.code, b), l = lines()[k] || { code: s.code, batch: b, ctn: null, box: null, pcs: null, remark: "" }, rc = rcMap();
@@ -418,6 +442,8 @@ function batchRow(s, b, locked, redraw) {
 export function setLine(s, b, patch) {
   var c = cur(), L = c.lines = c.lines || {}, k = lk(s.code, b), l = L[k] || { code: s.code, batch: b, ctn: null, box: null, pcs: null, remark: "" };
   for (var p in patch) l[p] = patch[p]; l.t = nowIso(); L[k] = l; touch(); refreshProgress();
+  /* "Continue as last time" is kept only once this warehouse has a real count on this phone */
+  if (S.lastLogin && S.lastLogin.branch === c.branch && hasQty(l)) { store("ndd2-last", S.lastLogin); S.lastLogin = null; }
 }
 export function pickBatch(s, cur0, done) {
   var m = /^(\d{4})-(\d{2})/.exec(cur0 || ""), now = new Date(), yr = m ? +m[1] : now.getFullYear() + 1, sel = m ? +m[2] : 0;
@@ -527,10 +553,14 @@ function renderStart(app) {
       });
       wrap.append(cg, el("h2", { style: "margin-top:20px", text: "Or start a new count" }));
     } else if (last && last.code) {
-      wrap.append(el("button", { class: "big rcard", onclick: function () { pp.login(last.code); } },
-        el("span", { class: "ric" }, svg(ICON.home)),
-        el("span", { class: "rtx" }, el("span", { class: "small muted", text: "Continue as last time" }), el("span", { class: "rt", text: last.branch + " · " + last.code })),
-        svg(ICON.next, 18)));
+      wrap.append(el("div", { class: "lastrow" },
+        el("button", { class: "big rcard", onclick: function () { pp.login(last.code); } },
+          el("span", { class: "ric" }, svg(ICON.home)),
+          el("span", { class: "rtx" }, el("span", { class: "small muted", text: "Continue as last time" }), el("span", { class: "rt", text: last.branch + " · " + last.code })),
+          svg(ICON.next, 18)),
+        el("button", { class: "iconbtn lastx", "aria-label": "Remove " + last.branch + " shortcut", onclick: function () {
+          confirmBox("Remove this shortcut?", last.branch + " · " + last.code + "\n\nOnly the “Continue as last time” shortcut is removed from this phone. Counts already sent are not affected.", "Remove", function () { store("ndd2-last", null); hooks.render(); });
+        } }, svg(ICON.close, 18))));
     }
     wrap.append(el("div", { class: "card padcard" }, pp),
       el("p", { class: "center", style: "margin-top:14px" }, el("button", { class: "link strong", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })));
@@ -564,9 +594,9 @@ function renderStart(app) {
   body.append(facts);
   var nPh = (pr.photoRoles || []).length ? Number(pr.photoMin) || 0 : 0;
   body.append(el("div", { class: "todo" }, el("small", { text: "What you'll do" }),
-    el("div", {}, el("i", { text: "1" }), daily ? "Count " + (n || 0) + " SKUs, every batch you find" : "Count every SKU and batch on your list"),
-    el("div", {}, el("i", { text: "2" }), nPh ? "Take " + nPh + " photos of the warehouse" : "Check your counts"),
-    el("div", {}, el("i", { text: "3" }), "Everyone signs, then submit")));
+    nPh ? el("div", {}, el("i", { text: "1" }), "Take " + nPh + " photos of the warehouse first") : null,
+    el("div", {}, el("i", { text: nPh ? "2" : "1" }), daily ? "Count " + (n || 0) + " SKUs, every batch you find" : "Count every SKU and batch on your list"),
+    el("div", {}, el("i", { text: nPh ? "3" : "2" }), "Check, everyone signs, then submit")));
   task.append(body); app.append(task);
 
   if (!singleMode()) {

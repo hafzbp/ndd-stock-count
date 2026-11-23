@@ -51,7 +51,7 @@ with sync_playwright() as p:
 
     print("HQ: settings")
     ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Daily cycle count")
-    ow.locator(".card:has(h3:text-is('Warehouse photos at submit')) input[type=number]").first.fill("0"); ow.click(".card:has(h3:text-is('Warehouse photos at submit')) button:has-text('Save')"); ow.click(SB("OK"))
+    ow.locator(".card:has(h3:text-is('Warehouse photos before counting')) input[type=number]").first.fill("0"); ow.click(".card:has(h3:text-is('Warehouse photos before counting')) button:has-text('Save')"); ow.click(SB("OK"))
     ow.click(WH("NDD Alpha") + " button:text-is('Edit')"); ow.click(SB("Create PIN")); ow.click(SB("Create")); ow.wait_for_selector("#sheet >> text=PIN:")
     pin = ow.inner_text("#sheet").split("PIN: ")[1][:6]; check("supervisor PIN shown once (6 digits)", pin.isdigit() and len(pin) == 6, pin); ow.click(SB("OK"))
     ow.wait_for_timeout(400); check("PIN status: not changed yet", "not changed yet" in ow.inner_text(WH("NDD Alpha")), ow.inner_text(WH("NDD Alpha")))
@@ -69,6 +69,17 @@ with sync_playwright() as p:
     op.wait_for_function("document.querySelector('#sub').textContent.indexOf('Daily count · NDD Alpha') === 0", timeout=5000); check("header says Daily count", op.inner_text("#sub").startswith("Daily count · NDD Alpha"), op.inner_text("#sub"))
     op.click(".skuh:has-text('A1')"); op.wait_for_selector("#skuv"); op.locator("#skuv .batch").first.locator(".val").last.click()
     [op.click(f"#sheet .pad button:text-is('{k}')") for k in "355"]; op.click(SB("OK")); op.wait_for_timeout(2500)
+
+    print("'Continue as last time' shortcut")
+    check("shortcut saved only after a real count (Alpha counted)", "1501" in (op.evaluate("localStorage.getItem('ndd2-last')") or ""), op.evaluate("localStorage.getItem('ndd2-last')"))
+    lp = page(390, 844); lp.goto(BASE + "/?api=local"); lp.wait_for_selector("text=Start counting"); pad(lp, "1502"); lp.wait_for_selector(".task")
+    lp.click("[aria-label='Different warehouse']"); lp.wait_for_selector("text=Start counting")
+    check("login without counting: no shortcut", lp.evaluate("localStorage.getItem('ndd2-last')") is None and not lp.is_visible("text=Continue as last time"))
+    lp.evaluate("localStorage.setItem('ndd2-last', JSON.stringify({code: '1502', branch: 'NDD Beta'}))"); lp.reload(); lp.wait_for_selector("text=Continue as last time")
+    lp.click("[aria-label='Remove NDD Beta shortcut']"); lp.wait_for_selector("#sheet >> text=Remove this shortcut?"); check("delete asks to confirm first", True)
+    lp.click(SB("Cancel")); check("cancel keeps it", lp.is_visible("text=Continue as last time"))
+    lp.click("[aria-label='Remove NDD Beta shortcut']"); lp.click(SB("Remove")); lp.wait_for_timeout(300)
+    check("removed", not lp.is_visible("text=Continue as last time") and lp.evaluate("localStorage.getItem('ndd2-last')") is None); lp.close()
 
     print("HQ sees progress; Master read-only view")
     ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily counts ·"); ow.wait_for_timeout(500)

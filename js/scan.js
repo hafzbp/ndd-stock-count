@@ -1,4 +1,5 @@
-/* Barcode scanning: camera overlay, green tick on detection, then a count sheet for that SKU.
+/* Barcode scanning: camera overlay, green tick on detection, then a count sheet for that SKU. Save closes the camera
+   and goes back to the count list: scan > quantity > save > list, one SKU at a time.
    Uses zxing-wasm (vendor/zxing.js + zxing_reader.wasm). A handheld scanner works too: it types
    the barcode into the search box and presses Enter (see count.js). */
 import { S, cur, touch, hooks } from "./state.js";
@@ -157,7 +158,7 @@ function openCount(s, barcode, uom) {
   openSheet(function (sh) {
     var vals = { ctn: null, box: null, pcs: null }, inputs = {};
     var prevBox = el("div", { class: "prev hidden" }), totalEl = el("span", { text: "0 PCS" });
-    var saveBtn = el("button", { class: "btn primary grow", type: "button", text: "Save & scan next" });
+    var saveBtn = el("button", { class: "btn primary grow", type: "button", text: "Save" });
     function loadPrev() {
       var l = batch != null ? (m.lines || {})[lk(s.code, batch)] : null;
       if (l && (l.ctn != null || l.box != null || l.pcs != null)) {
@@ -174,7 +175,7 @@ function openCount(s, barcode, uom) {
       totalEl.textContent = cv.ok ? fmt(cv.qty || 0) + " PCS" : "No conversion - tell your admin";
       var any = vals.ctn != null || vals.box != null || vals.pcs != null;
       saveBtn.disabled = batch == null || !any;
-      saveBtn.textContent = batch == null ? "Pick the batch month first" : !any ? "Enter the quantity" : (ov ? "Save & scan next" : "Save");
+      saveBtn.textContent = batch == null ? "Pick the batch month first" : !any ? "Enter the quantity" : "Save";
     }
     function stepper(f, label, sub) {
       var inp = el("input", { type: "number", inputmode: "numeric", min: "0", step: "1", placeholder: "0", "aria-label": label });
@@ -206,7 +207,8 @@ function openCount(s, barcode, uom) {
       var cv = toPcs(vals, s);
       setLine(s, batch, { ctn: vals.ctn, box: vals.box, pcs: vals.pcs });
       S.open[s.code] = true;
-      closeSheet(true);
+      /* one scan = one SKU: save, then back to the list (no scanning on to the next SKU by accident) */
+      if (ov) closeScanner(); else closeSheet(false);
       toast("Saved: " + s.code + " · " + bLabel(batch) + " · " + (cv.ok ? fmt(cv.qty) + " PCS" : "check conversion"));
     });
     sh.append(

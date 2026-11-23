@@ -41,6 +41,14 @@ def code(pg, digits):
     for d in digits: pg.click(f".pad button:text-is('{d}')")
     pg.click("button:text-is('Next')")
 
+def gate(pg, n=3):
+    """warehouse photos come first: fill the blocking photo step if it shows"""
+    try: pg.wait_for_selector("#modal.lock.on", timeout=4000)
+    except Exception: return
+    for i in range(n):
+        os.utime(f"{OUT}/p{i}.jpg", None); pg.set_input_files("#sheet input[type=file]", f"{OUT}/p{i}.jpg"); pg.wait_for_selector(f"#sheet >> text={i + 1} of 5 photos", timeout=15000)
+    pg.click("#sheet button.big1"); pg.wait_for_timeout(300)
+
 with sync_playwright() as p:
     br = p.chromium.launch(executable_path="/usr/bin/google-chrome", args=["--no-sandbox","--use-fake-ui-for-media-stream","--use-fake-device-for-media-stream",f"--use-file-for-fake-video-capture={CAM}","--autoplay-policy=no-user-gesture-required"])
     errs = []
@@ -98,7 +106,27 @@ with sync_playwright() as p:
     op.wait_for_selector("text=Which team are you?"); op.click(".big:has-text('Ops team counts')")
     op.wait_for_selector("text=Who is counting?"); op.click(".big:has-text('Ali Rahman')"); op.click(".big:has-text('Budi')"); op.click(B("Start ops count"))
     op.wait_for_selector("text=OPS COUNT"); op.wait_for_selector("text=0 / 3 SKUs counted"); check("count screen opens with 3 SKUs", True)
+    op.wait_for_selector("#modal.lock.on >> text=First: warehouse photos", timeout=10000); check("photos come first: blocking step before counting", True)
+    op.mouse.click(5, 5); op.wait_for_timeout(300); check("photo step can't be closed by tapping outside", op.is_visible("#modal.lock.on"))
+    check("Start counting disabled with 0 photos", op.is_disabled("#sheet button.big1"), op.inner_text("#sheet button.big1"))
+    check("camera only: no gallery button", not op.is_visible("#sheet >> text=From gallery") and op.locator("#sheet input[type=file]").count() == 1)
+    old_t = time.time() - 3600; os.utime(f"{OUT}/p3.jpg", (old_t, old_t))
+    op.set_input_files("#sheet input[type=file]", f"{OUT}/p3.jpg"); op.wait_for_selector("#sheet >> text=Take a new photo with the camera")
+    check("an old photo (from the gallery) is refused", "0 of 5 photos" in op.inner_text("#sheet"))
+    for i in range(3):
+        os.utime(f"{OUT}/p{i}.jpg", None)
+        op.set_input_files("#sheet input[type=file]", f"{OUT}/p{i}.jpg"); op.wait_for_selector(f"#sheet >> text={i + 1} of 5 photos", timeout=15000)
+    check("location note shown", "Location found" in op.inner_text("#sheet"), op.inner_text("#sheet")[:400])
+    dark = op.evaluate("""async () => { const im = document.querySelector('#sheet .pthumb img'); await im.decode(); const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const x = c.getContext('2d'); x.drawImage(im, 0, 0);
+      const lum = (a) => { let t = 0; for (let i = 0; i < a.length; i += 4) t += (a[i] + a[i+1] + a[i+2]) / 3; return t / (a.length / 4); };
+      return { band: lum(x.getImageData(c.width - 40, c.height - 6, 30, 4).data), top: lum(x.getImageData(10, 10, 30, 4).data), mid: lum(x.getImageData(0, c.height - 120, c.width, 100).data) }; }""")
+    check("photo has a dark stamp band at the bottom", dark["band"] < dark["top"] * 0.6, dark)
+    sl = op.evaluate("""async () => { const m = await import('./js/photos.js'); return [m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: {lat: 3.0732, lon: 101.5183, acc: 12}, addr: 'Jalan Test 23, Shah Alam', who: 'NDD Alpha · Stock take · Ali'}), m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: null})]; }""")
+    check("stamp text: date+time MYT, GPS, address, who", sl[0] == ["18 Nov 2026, 10:52:13 MYT", "GPS 3.073200, 101.518300 (±12 m)", "Jalan Test 23, Shah Alam", "NDD Alpha · Stock take · Ali"], sl[0])
+    check("stamp text without location: 'Location not shared'", sl[1] == ["18 Nov 2026, 10:52:13 MYT", "Location not shared"], sl[1])
+    check("3 photos → Start counting", op.inner_text("#sheet button.big1") == "Start counting" and not op.is_disabled("#sheet button.big1")); op.click("#sheet button.big1"); op.wait_for_timeout(300)
     op.click(".skuh:has-text('B2')"); op.wait_for_selector("#skuv"); bt = op.locator("#skuv .batch").first
+    check("one SKU at a time: no next-SKU button or arrows", not op.is_visible("#skuv >> text=Save & next SKU") and op.locator("#skuv [aria-label='Next SKU']").count() == 0 and op.is_visible("#skuv >> text=Save & back to list"))
     bt.locator("button.plus").nth(0).click(); op.locator("#skuv .batch").first.locator("button.plus").nth(1).click()
     check("B2: 1 ctn + 1 box = 60 PCS", "= 60 PCS" in op.locator("#skuv .batch").first.inner_text())
     op.locator("#skuv .batch").first.locator(".val").nth(2).click(); [op.click(f"#sheet .pad button:text-is('{k}')") for k in ["4","×","1","0"]]; op.click(SB("OK"))
@@ -109,8 +137,8 @@ with sync_playwright() as p:
     op.click(".ssheet .chip >> text=03/2027"); op.click(".ssheet [aria-label='plus Carton']"); op.click(".ssheet [aria-label='plus Carton']")
     op.fill(".ssheet [aria-label='Pieces']", "5"); op.dispatch_event(".ssheet [aria-label='Pieces']", "input")
     check("scan: 2 ctn + 5 pcs = 53 PCS", "53 PCS" in op.inner_text(".ssheet .stotal"))
-    op.click(".ssheet .btn.primary"); op.wait_for_timeout(1500); check("scan: no instant reopen after save", not op.is_visible(".ssheet.on"))
-    op.wait_for_selector(".ssheet.on", timeout=10000); check("scan: rescan shows previous count", op.input_value(".ssheet [aria-label='Carton']") == "2")
+    op.click(".ssheet .btn.primary"); op.wait_for_timeout(1200); check("scan: save closes the camera and goes back to the list", not op.is_visible(".scanov") and not op.is_visible(".ssheet.on") and op.is_visible(".skulist2"))
+    op.click("#footIn .scanbtn"); op.wait_for_selector(".ssheet.on", timeout=15000); check("scan: rescan shows previous count", op.input_value(".ssheet [aria-label='Carton']") == "2")
     op.click(".ssheet >> text=Cancel"); op.click(".scanbar >> text=Done"); op.click(".seg button:text-is('All')")
     check("scan result in list (53 PCS)", "53 PCS" in op.locator(".sku:has-text('A1')").first.inner_text())
     op.fill(".sbox input", "8993175536707"); op.press(".sbox input", "Enter"); op.wait_for_selector(".ssheet.on")
@@ -130,28 +158,12 @@ with sync_playwright() as p:
 
     print("submit with photos")
     (op.click("#skuv [aria-label='Back to list']") if op.is_visible("#skuv") else None); op.click("#footIn >> text=Submit"); op.wait_for_selector("#sheet >> text=Review & submit"); op.check("#sheet input[type=checkbox]"); sign(op, 0); sign(op, 1)
-    check("submit disabled with 0 photos", op.is_disabled("#sheet >> text=Submit count"))
-    check("camera only: no gallery button", not op.is_visible("#sheet >> text=From gallery") and op.locator("#sheet input[type=file]").count() == 1)
-    old_t = time.time() - 3600; os.utime(f"{OUT}/p3.jpg", (old_t, old_t))
-    op.set_input_files("#sheet input[type=file]", f"{OUT}/p3.jpg"); op.wait_for_selector("#sheet >> text=Take a new photo with the camera")
-    check("an old photo (from the gallery) is refused", "0 of 5 photos" in op.inner_text("#sheet"))
-    for i in range(3):
-        os.utime(f"{OUT}/p{i}.jpg", None)
-        op.set_input_files("#sheet input[type=file]", f"{OUT}/p{i}.jpg"); op.wait_for_selector(f"#sheet >> text={i + 1} of 5 photos", timeout=15000)
-    check("location note shown", "Location found" in op.inner_text("#sheet"), op.inner_text("#sheet")[:400])
-    dark = op.evaluate("""async () => { const im = document.querySelector('#sheet .pthumb img'); await im.decode(); const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const x = c.getContext('2d'); x.drawImage(im, 0, 0);
-      const lum = (a) => { let t = 0; for (let i = 0; i < a.length; i += 4) t += (a[i] + a[i+1] + a[i+2]) / 3; return t / (a.length / 4); };
-      return { band: lum(x.getImageData(c.width - 40, c.height - 6, 30, 4).data), top: lum(x.getImageData(10, 10, 30, 4).data), mid: lum(x.getImageData(0, c.height - 120, c.width, 100).data) }; }""")
-    check("photo has a dark stamp band at the bottom", dark["band"] < dark["top"] * 0.6, dark)
-    sl = op.evaluate("""async () => { const m = await import('./js/photos.js'); return [m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: {lat: 3.0732, lon: 101.5183, acc: 12}, addr: 'Jalan Test 23, Shah Alam', who: 'NDD Alpha · Stock take · Ali'}), m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: null})]; }""")
-    check("stamp text: date+time MYT, GPS, address, who", sl[0] == ["18 Nov 2026, 10:52:13 MYT", "GPS 3.073200, 101.518300 (±12 m)", "Jalan Test 23, Shah Alam", "NDD Alpha · Stock take · Ali"], sl[0])
-    check("stamp text without location: 'Location not shared'", sl[1] == ["18 Nov 2026, 10:52:13 MYT", "Location not shared"], sl[1])
     check("submit enabled with 3 photos", not op.is_disabled("#sheet >> text=Submit count"))
     op.click("#sheet >> text=Submit count"); op.wait_for_selector("text=Submitted ✓", timeout=10000); check("submitted, locked", not op.is_visible("#footIn >> text=Submit"))
 
     print("finance phone + warehouse without team list")
     fn = phone(); fn.goto(BASE + "/?api=local"); fn.wait_for_selector("text=Start counting"); code(fn, "1501")
-    fn.click(".big:has-text('Finance counts again')"); fn.click(".big:has-text('Siti Aminah')"); fn.click(B("Start finance check")); fn.wait_for_selector("text=FINANCE CHECK")
+    fn.click(".big:has-text('Finance counts again')"); fn.click(".big:has-text('Siti Aminah')"); fn.click(B("Start finance check")); fn.wait_for_selector("text=FINANCE CHECK"); gate(fn)
     def setpcs(c, n):
         fn.fill(".sbox input", c); fn.dispatch_event(".sbox input", "input"); fn.click(f".skuh:has-text('{c}')"); fn.wait_for_selector("#skuv")
         fn.locator("#skuv .batch").first.locator(".val").last.click()
@@ -162,7 +174,7 @@ with sync_playwright() as p:
     gm = phone(); gm.goto(BASE + "/?api=local"); gm.wait_for_selector("text=Start counting"); code(gm, "1503")
     gm.click(".big:has-text('Ops team counts')"); gm.wait_for_selector("input[placeholder='Type your name, then Add']")
     check("no team list → name box straight away", True)
-    gm.fill("input[placeholder='Type your name, then Add']", "Rahim"); gm.press("input[placeholder='Type your name, then Add']", "Enter"); gm.click(B("Start ops count")); gm.wait_for_selector("text=OPS COUNT")
+    gm.fill("input[placeholder='Type your name, then Add']", "Rahim"); gm.press("input[placeholder='Type your name, then Add']", "Enter"); gm.click(B("Start ops count")); gm.wait_for_selector("text=OPS COUNT"); gate(gm)
 
     print("in-app browser (WhatsApp)")
     wa = phone(ua="Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 WhatsApp/2.24.1"); wa.goto(BASE + "/?api=local")
@@ -178,7 +190,7 @@ with sync_playwright() as p:
     with ow.expect_download() as d2: ow.click(B("Sign-off PDF"))
     d2.value.save_as(f"{OUT}/signoff.pdf"); check("sign-off PDF downloads", os.path.getsize(f"{OUT}/signoff.pdf") > 5000); ow.click(SB("OK"))
     pdfb = open(f"{OUT}/signoff.pdf", "rb").read()
-    check("sign-off PDF has the warehouse photo page with 3 photos", b"Warehouse photos \\(3\\)" in pdfb and pdfb.count(b"/Subtype /Image") >= 4, (pdfb.count(b"/Subtype /Image"), os.path.getsize(f"{OUT}/signoff.pdf")))
+    check("sign-off PDF has the warehouse photo page (3 ops + 3 finance)", b"Warehouse photos \\(6\\)" in pdfb and pdfb.count(b"/Subtype /Image") >= 4, (pdfb.count(b"/Subtype /Image"), os.path.getsize(f"{OUT}/signoff.pdf")))
     db = phone(1280, 800); db.goto(BASE + "/dashboard/?api=local"); db.wait_for_selector("text=NDD Alpha")
     t = db.inner_text("main"); check("dashboard: progress while open", "Variance is not published" in t and "Ops: Counting" in t, t[:300])
     ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector(".state.open"); ow.click(B("Close counting")); ow.click("#sheet button:text-is('Close')"); ow.wait_for_selector(".state.closed")
@@ -198,7 +210,7 @@ with sync_playwright() as p:
     ow.click("main button:text-is('Open counting')"); ow.click("#sheet button:text-is('Open')"); ow.wait_for_selector(".state.open")
     op.reload(); op.wait_for_selector("text=Start counting"); check("old counts gone on phone after new stock take", True)
     code(op, "1501"); op.click(".big:has-text('Ops team counts')"); op.click(".big:has-text('Ali Rahman')"); op.click(B("Start ops count"))
-    op.wait_for_selector(".kind-monthly >> text=only 1 SKU on your list"); check("partial: counter sees 1 SKU", "MONTHLY STOCK TAKE" in op.inner_text(".kind-monthly") and "0 / 1 SKUs counted" in op.inner_text("main"), op.inner_text("main")[:300])
+    op.wait_for_selector(".kind-monthly >> text=only 1 SKU on your list"); gate(op); check("partial: counter sees 1 SKU", "MONTHLY STOCK TAKE" in op.inner_text(".kind-monthly") and "0 / 1 SKUs counted" in op.inner_text("main"), op.inner_text("main")[:300])
     ow.wait_for_selector("text=History"); ow.click("button.link:has-text('View (read-only)')"); ow.wait_for_selector("text=History (read-only): Test count")
     check("history opens read-only in Master", not ow.is_visible(B("Close counting")) and not ow.is_visible(B("Send recount list")))
     ow.click(B("Back to current")); ow.wait_for_timeout(800)
@@ -219,7 +231,7 @@ with sync_playwright() as p:
     check("open card: Single count + one-team progress table", "Single count" in ow.inner_text("main") and "Count" in ow.inner_text(".mcard") and "Finance check" not in ow.inner_text(".mcards"))
     op.reload(); op.wait_for_selector("text=Start counting"); code(op, "1501"); op.wait_for_selector(".task")
     op.wait_for_selector("text=Who is counting?"); check("single: team step skipped", not op.is_visible("text=Which team are you?"))
-    op.click(".big:has-text('Ali Rahman')"); op.click(B("Start count")); op.wait_for_selector("text=COUNT - count every SKU")
+    op.click(".big:has-text('Ali Rahman')"); op.click(B("Start count")); op.wait_for_selector("text=COUNT - count every SKU"); gate(op)
     op.fill(".sbox input", "C3"); op.dispatch_event(".sbox input", "input"); op.wait_for_timeout(300)
     op.click(".skuh:has-text('C3')"); op.wait_for_selector("#skuv")
     op.locator("#skuv .batch").first.locator(".val").last.click(); [op.click(f"#sheet .pad button:text-is('{k}')") for k in ["6","0"]]; op.click(SB("OK")); op.click("#skuv [aria-label='Back to list']"); 

@@ -1,3 +1,4 @@
+from photogate import gate
 import sys, subprocess, time
 ok=0; bad=0
 def check(n,c,e=""):
@@ -20,7 +21,7 @@ with sync_playwright() as p:
     op.goto(BASE+"/?api=local"); op.wait_for_selector("text=Start counting")
     for d in "1501": op.click(f".pad button:text-is('{d}')")
     op.click("button:text-is('Next')"); op.wait_for_selector("text=Who is counting?")
-    op.fill("input[placeholder*='name' i]","Ali"); op.keyboard.press("Enter"); op.wait_for_timeout(300); op.click(B("Start count")); op.wait_for_selector("text=COUNT - count every SKU")
+    op.fill("input[placeholder*='name' i]","Ali"); op.keyboard.press("Enter"); op.wait_for_timeout(300); op.click(B("Start count")); op.wait_for_selector("text=COUNT - count every SKU"); gate(op)
     op.click(".skuh:has-text('A1')"); op.wait_for_selector("#skuv"); op.locator("#skuv .batch").first.locator(".val").last.click()
     [op.click(f"#sheet .pad button:text-is('{k}')") for k in "10"]; op.click(SB("OK")); op.wait_for_timeout(2500)
     ow.click(B("Close counting")); ow.click("#sheet button:text-is('Close')"); ow.wait_for_selector(".state.closed")

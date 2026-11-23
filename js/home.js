@@ -19,7 +19,7 @@ function typeTxt(t) { return (t.scope === "partial" ? "Partial · " + t.skuCount
 function stateTag(s) { return el("span", { class: "state " + s, text: s === "open" ? "Open" : s === "closed" ? "Closed" : "Draft" }); }
 
 export function waMessage() {
-  var t = info(), c = S.cfg || {}, rule = (c.photoRoles || []).length ? "\nBefore you submit: take " + (c.photoMin || 3) + "-" + (c.photoMax || 5) + " photos of the warehouse." : "";
+  var t = info(), c = S.cfg || {}, rule = (c.photoRoles || []).length ? "\nBefore you count: take " + (c.photoMin || 3) + "-" + (c.photoMax || 5) + " photos of the warehouse." : "";
   return "Stock take: " + (t.name || "") + (t.stockType === "bad" ? " - BAD STOCK only (locations BS00, BS01, SH00)" : "") + (t.scope === "partial" ? " (partial, " + t.skuCount + " SKUs)" : "") +
     "\n1. Open this link in Chrome or Safari (not inside WhatsApp): " + appUrl() +
     "\n2. Enter your warehouse plant code (for example 1508)" +

@@ -1,3 +1,4 @@
+from photogate import gate
 # Bad-stock stock take end to end: wizard choice, MB52 loads only BS00/BS01/SH00 rows, counter sees BAD STOCK,
 # changing the kind after the upload asks first and clears the MB52. Fresh server: BOOTSTRAP_CODE=SETUP-123 node server.mjs
 # (run after ui_test.py has written /tmp/ndd-ui/mb52.xlsx).
@@ -37,7 +38,7 @@ with sync_playwright() as p:
     for d in "1501": op.click(f".pad button:text-is('{d}')")
     op.click("button:text-is('Next')"); op.wait_for_selector(".kind-bad")
     kt = op.inner_text(".kind-bad"); check("counter: red MONTHLY STOCK TAKE · BAD STOCK label", "MONTHLY STOCK TAKE · BAD STOCK" in kt and "BS00, BS01, SH00" in kt, kt)
-    op.wait_for_selector("text=Who is counting?"); op.fill("input[placeholder*='name' i]", "Ali"); op.keyboard.press("Enter"); op.wait_for_timeout(300); op.click(B("Start count")); op.wait_for_selector(".chead"); op.wait_for_timeout(300)
+    op.wait_for_selector("text=Who is counting?"); op.fill("input[placeholder*='name' i]", "Ali"); op.keyboard.press("Enter"); op.wait_for_timeout(300); op.click(B("Start count")); op.wait_for_selector(".chead"); op.wait_for_timeout(300); gate(op)
     lst = op.inner_text("main"); check("counter 'To count' list: only the bad-stock SKU (A1)", "A1" in lst and "B2" not in lst and "D4" not in lst and "0 / 1 SKUs counted" in lst, lst[:400])
     check("header says Bad stock take", op.inner_text("#sub").startswith("Bad stock take"), op.inner_text("#sub"))
     op.click(".skuh:has-text('A1')"); op.wait_for_selector("#skuv"); op.locator("#skuv .batch").first.locator(".val").last.click()

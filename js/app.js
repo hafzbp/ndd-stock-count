@@ -187,7 +187,7 @@ async function tick() {
 async function init() {
   $("#lockBtn").addEventListener("click", onLockBtn);
   if (/[?&]api=/.test(location.search)) $("#dashBtn").href = "dashboard/" + location.search;
-  $("#modal").addEventListener("click", function (e) { if (e.target.id === "modal") closeModal(); });
+  $("#modal").addEventListener("click", function (e) { if (e.target.id === "modal" && !e.target.classList.contains("lock")) closeModal(); });
   loadLocal(); loadSupTok();
   try { var c = localStorage.getItem("ndd2-cfg"); if (c) S.cfg = JSON.parse(c); } catch (e) { }
   if (S.cfg) render();

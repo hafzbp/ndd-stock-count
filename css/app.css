@@ -375,3 +375,38 @@ header .hbtn{display:inline-flex;align-items:center;gap:6px}header .hbtn .lbl{wh
   .statrow{grid-template-columns:repeat(5,1fr);gap:6px}.stat2{padding:9px 8px}.stat2 b{font-size:20px}.stat2 span{font-size:11px;line-height:1.2}
   .pagehead h1{font-size:21px}
 }
+
+/* ===== v2.11 counter: smaller on phones, last-time shortcut, photo step ===== */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.lastrow{display:flex;align-items:stretch;gap:6px;margin-bottom:12px}
+.lastrow .big.rcard{margin-bottom:0;flex:1;min-width:0}
+.lastrow .lastx{height:auto;width:48px;border:1px solid var(--line);background:var(--card);color:var(--mute)}
+.gateic{width:52px;height:52px;border-radius:14px;background:var(--infobg);display:flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:8px}
+.skuh .desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
+.nextup b{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
+.skuh .tot.todo{font-size:12px}
+@media (max-width:480px){
+  body{font-size:14px}
+  header{padding:8px 12px}
+  .rt{font-size:15px}
+  .btn.big1{min-height:50px;font-size:16px}
+  .plantpad h2{font-size:22px}
+  .codebox{gap:8px}.codebox span{height:52px;font-size:24px;border-radius:12px}
+  .plantpad .pad button{height:50px;font-size:21px}
+  .big.rcard{padding:10px 12px}.rcard .ric{width:34px;height:34px}
+  .tbig b{font-size:36px}.tbody{padding:14px;gap:12px}
+  .chead{padding:12px;border-radius:14px}
+  .chead .seg{margin-top:10px}.chead .seg .chip{height:34px;font-size:12.5px}
+  .nextup{padding:10px 12px;gap:10px;border-radius:14px}.nextup b{font-size:14px}.nextup .nxb{height:38px;padding:0 12px;font-size:14px}
+  .sbox input{font-size:15px;padding:10px 40px}
+  .skuh{min-height:52px;padding:8px 12px;gap:10px}
+  .sbadge{width:24px;height:24px;border-radius:7px;font-size:12px}
+  .skuh .desc{font-size:13.5px}.skuh .code{font-size:11.5px}
+  .skuh .tot{font-size:12.5px}
+  .iconbtn2{width:44px}
+  .scanbtn{min-height:48px;font-size:16px}
+  .revbtn{min-height:48px;font-size:14px}
+  .svname{font-size:19px}
+  .svbody .step button{width:50px;height:50px;font-size:24px}.svbody .step .val{height:50px;font-size:21px}
+  .rsec{padding:12px}.donecard h2{font-size:22px}
+}

@@ -1,3 +1,4 @@
+from photogate import gate
 # Walks through every screen (admin, monthly wizard, master, settings, dashboard, counter, supervisor, modals,
 # public dashboard) in dark and light mode and reports text whose contrast with its background is too low.
 # Fresh server: BOOTSTRAP_CODE=SETUP-123 SEED_BRANCHES="NDD Alpha,NDD Beta" node server.mjs  (needs /tmp/ndd-ui/mb52.xlsx)
@@ -59,7 +60,7 @@ with sync_playwright() as p:
     for d in "1501": op.click(f".pad button:text-is('{d}')")
     op.click("button:text-is('Next')"); op.wait_for_selector(".task"); audit(op, "counter confirm")
     op.wait_for_selector("text=Who is counting?"); audit(op, "counter names")
-    op.fill("input[placeholder*='name' i]", "Siti"); op.keyboard.press("Enter"); op.wait_for_timeout(300); op.click(B("Start count")); op.wait_for_timeout(800); audit(op, "counter count list")
+    op.fill("input[placeholder*='name' i]", "Siti"); op.keyboard.press("Enter"); op.wait_for_timeout(300); op.click(B("Start count")); op.wait_for_selector("#modal.lock.on", timeout=6000); op.wait_for_timeout(600); audit(op, "counter photo step"); gate(op); op.wait_for_timeout(500); audit(op, "counter count list")
     op.click(".skuh:has-text('A1')"); op.wait_for_selector("#skuv"); audit(op, "counter sku open")
     op.locator("#skuv .batch").first.locator(".val").last.click(); audit(op, "counter number pad"); [op.click(f"#sheet .pad button:text-is('{k}')") for k in "12"]; op.click(SB("OK"))
     sp = page(390, 844); sp.goto(BASE + "/?api=local"); sp.click(B("Warehouse supervisor? Log in here")); audit(sp, "modal supervisor login")

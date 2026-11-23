@@ -161,8 +161,8 @@ export function renderSetup(app) {
   var pmin = el("input", { type: "number", min: "0", max: "20", value: String(st.photo_min != null ? st.photo_min : 3), style: "max-width:80px" });
   var pmax = el("input", { type: "number", min: "1", max: "20", value: String(st.photo_max != null ? st.photo_max : 5), style: "max-width:80px" });
   var roles = st.photo_roles || ["ops", "fin"], rOps = el("input", { type: "checkbox", checked: roles.indexOf("ops") >= 0 }), rFin = el("input", { type: "checkbox", checked: roles.indexOf("fin") >= 0 });
-  app.append(el("div", { class: "card" }, el("h3", { text: "Warehouse photos at submit" }),
-    el("p", { class: "small muted", text: "Counters must add at least the minimum before they can submit. Maximum is the most they can add." }),
+  app.append(el("div", { class: "card" }, el("h3", { text: "Warehouse photos before counting" }),
+    el("p", { class: "small muted", text: "Counters take at least the minimum right after they start, before they can count (only skipped when the phone has no signal - then they are asked again before submitting). Maximum is the most they can add." }),
     el("div", { class: "row" }, el("span", { text: "Min" }), pmin, el("span", { text: "Max" }), pmax),
     el("div", { class: "row", style: "margin-top:8px" }, el("label", { class: "row small", style: "gap:6px" }, rOps, "Required for Ops"), el("label", { class: "row small", style: "gap:6px" }, rFin, "Required for Finance")),
     el("div", { class: "row", style: "justify-content:flex-end;margin-top:8px" }, el("button", { class: "btn primary", text: "Save", onclick: function () {
