@@ -324,21 +324,25 @@ await t("10 wrong plant codes lock plant login for 15 minutes", async () => {
 
 console.log("daily cycle count");
 let A2, SUP, PIN, TD;
-const day = async (d) => { await db.query(`insert into public.settings (key, value) values ('test_today', '"${d}"') on conflict (key) do update set value = excluded.value`); };
+const day = async (d, release = true) => {
+  await db.query(`insert into public.settings (key, value) values ('test_today', '"${d}"') on conflict (key) do update set value = excluded.value`);
+  /* HQ uploads that day's MB52 in the morning: it releases the day's daily counts */
+  if (release) await rpc("admin_load_daily", { p_token: A2, p_date: d, p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
+};
 await t("setup: admin login, monthly closed, photos optional, today = Wed 18 Nov 2026", async () => {
   A2 = (await rpc("admin_login", { p_password: "NewAdm77" })).token; assert.ok(A2);
   await db.query("update public.stock_takes set status = 'closed', closed_at = now() - interval '2 days' where kind = 'monthly'"); await db.query("delete from public.count_log");
-  await rpc("admin_settings", { p_token: A2, p_patch: { photo_min: 0 } }); await day("2026-11-18");
+  await rpc("admin_settings", { p_token: A2, p_patch: { photo_min: 0 } }); await day("2026-11-18", false);
 });
 await t("no stock upload yet: nothing planned, counter told there's nothing to count", async () => {
   const r = await rpc("plant_login", { p_code: "1501" }); TD = r.token; assert.equal(r.take.kind, "monthly");
   await rejects(rpc("counter_start", { p_token: TD, p_device: "d-1", p_branch: "NDD Alpha", p_role: "ops", p_data: {} }), /Nothing to count at NDD Alpha today/);
-  const o = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(o.rows.find((x) => x.branch === "NDD Alpha").why, "nostock");
+  const o = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(o.rows.find((x) => x.branch === "NDD Alpha").why, "waiting"); assert.equal(r.wait, "release");
 });
 await t("daily stock upload; ABC by value per warehouse (A 80%, B next 15%, C rest)", async () => {
   await rpc("admin_settings", { p_token: A2, p_patch: { dcc_min_skus: 1 } });   // the list tests below check the ABC planning itself
-  const r = await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-17", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) }); assert.equal(r.branches, 2);
-  const kinds = (await db.query("select k.stype, k.code, k.qty::int as qty from public.snap_stock k join public.snapshots x on x.id = k.snap_id where x.snap_date = '2026-11-17' and k.branch = 'NDD Alpha' and k.stype = 'bad'")).rows;
+  const r = await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-18", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) }); assert.equal(r.branches, 2);
+  const kinds = (await db.query("select k.stype, k.code, k.qty::int as qty from public.snap_stock k join public.snapshots x on x.id = k.snap_id where x.snap_date = '2026-11-18' and k.branch = 'NDD Alpha' and k.stype = 'bad'")).rows;
   assert.deepEqual(kinds, [{ stype: "bad", code: "A1", qty: 99 }], "daily upload keeps bad stock apart");
   await rejects(rpc("admin_load_daily", { p_token: A2, p_date: "2026-12-01", p_payload: mb52Payload(["NDD Alpha"]) }), /stock date/);
   await rpc("admin_dcc_day", { p_token: A2 });
@@ -353,7 +357,7 @@ await t("today's list: monthly need spread over the remaining working days, A fi
   const again = await rpc("admin_dcc_day", { p_token: A2 }); assert.equal(again.rows.find((x) => x.branch === "NDD Alpha").take.id, al.take.id);
 });
 await t("uploading the MB52 again after today's list exists keeps the ABC (rebuilt during the upload)", async () => {
-  await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-17", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
+  await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-18", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
   const a = await rpc("admin_abc", { p_token: A2, p_branch: "NDD Alpha" });
   assert.deepEqual(a.rows.map((x) => x.code + ":" + x.cls), ["D4:A", "A1:A", "C3:B", "B2:C"]);
 });
@@ -400,7 +404,7 @@ await t("dashboard 2: region + NOM per warehouse; today per warehouse (status, t
   await db.query("update public.count_sessions set started_at = '2026-11-18 08:00:00+08' where device_id = 'd-1'");
   const o = await rpc("admin_dcc_today", { p_token: A2 }), al = o.rows.find((x) => x.branch === "NDD Alpha");
   assert.equal(o.date, "2026-11-18"); assert.equal(al.status, "ontime"); assert.equal(al.region, "Central"); assert.equal(al.nom, "Ahmad");
-  assert.equal(al.listed, 2); assert.equal(al.counted, 2); assert.equal(al.minutes, 30); assert.equal(al.who, "Ali"); assert.equal(al.snapDate, "2026-11-17");
+  assert.equal(al.listed, 2); assert.equal(al.counted, 2); assert.equal(al.minutes, 30); assert.equal(al.who, "Ali"); assert.equal(al.snapDate, "2026-11-18");
   assert.deepEqual(al.result, { ok: 0, within: 1, over: 1, nis: 0, notCounted: 0 });
   assert.equal(o.rows.find((x) => x.branch === "NDD Beta").status, "todo");
   const ins = await rpc("admin_dcc_insights", { p_token: A2, p_from: "2026-11-01", p_to: "2026-11-18" });
@@ -417,7 +421,7 @@ await t("daily report: every daily count in a period with SKU/batch results (exp
   const r = await rpc("admin_dcc_report", { p_token: A2, p_from: "2026-11-01", p_to: "2026-11-18" });
   const al = r.takes.find((x) => x.branch === "NDD Alpha");
   assert.equal(al.date, "2026-11-18"); assert.equal(al.listed, 2); assert.equal(al.who, "Ali"); assert.equal(al.late, false);
-  assert.equal(al.from, "07:00"); assert.equal(al.to, "10:00"); assert.equal(al.snapDate, "2026-11-17"); assert.equal(al.region, "Central");
+  assert.equal(al.from, "07:00"); assert.equal(al.to, "10:00"); assert.equal(al.snapDate, "2026-11-18"); assert.equal(al.region, "Central");
   assert.deepEqual(Object.keys(al.plan).sort(), ["C3", "D4"]);
   const fl = {}; al.lines.forEach((l) => { fl[l.code] = l.flag; });
   assert.deepEqual(fl, { C3: "OVER", D4: "WITHIN" });
@@ -500,6 +504,54 @@ await t("daily list is topped up to the minimum SKUs a day (all SKUs when a ware
   assert.equal(Object.keys(o.rows.find((x) => x.branch === "NDD Alpha").take.plan).length, 4);
   assert.equal(Object.keys(o.rows.find((x) => x.branch === "NDD Beta").take.plan).length, 2);
   await rpc("admin_settings", { p_token: A2, p_patch: { dcc_min_skus: 1 } });
+});
+await t("HQ deletes one count and stops / resumes a warehouse's daily count", async () => {
+  const TB = (await rpc("plant_login", { p_code: "1502" })).token, me = { member: "Budi", names: ["Budi"] };
+  const s = await rpc("counter_start", { p_token: TB, p_device: "d-b", p_branch: "NDD Beta", p_role: "ops", p_data: me });
+  await rejects(rpc("admin_delete_session", { p_token: TB, p_session: s.id }), /login|admin/i);
+  assert.equal((await rpc("admin_delete_session", { p_token: A2, p_session: s.id })).ok, true);
+  await rejects(rpc("counter_save", { p_token: TB, p_device: "d-b", p_id: s.id, p_data: me }), /cleared/);
+  const s2 = await rpc("counter_start", { p_token: TB, p_device: "d-b", p_branch: "NDD Beta", p_role: "ops", p_data: me });
+  assert.notEqual(s2.id, s.id, "counting starts again from zero");
+  await rpc("admin_stop_daily", { p_token: A2, p_branch: "NDD Beta", p_stop: true });
+  assert.equal((await rpc("admin_dcc_day", { p_token: A2 })).rows.find((x) => x.branch === "NDD Beta").why, "stopped");
+  const lb = await rpc("plant_login", { p_code: "1502" }); assert.equal(lb.wait, "stopped"); assert.notEqual(lb.take.kind, "daily");
+  await rejects(rpc("counter_save", { p_token: TB, p_device: "d-b", p_id: s2.id, p_data: me }), /cleared/);
+  await rejects(rpc("counter_start", { p_token: TB, p_device: "d-b", p_branch: "NDD Beta", p_role: "ops", p_data: me }), /Nothing to count|closed/);
+  await rpc("admin_stop_daily", { p_token: A2, p_branch: "NDD Beta", p_stop: false });
+  const be = (await rpc("admin_dcc_day", { p_token: A2 })).rows.find((x) => x.branch === "NDD Beta"); assert.equal(be.take.kind, "daily"); assert.equal(be.counted, 0);
+  /* a stopped day doesn't count in KPI001 */
+  await day("2026-11-25"); await rpc("admin_stop_daily", { p_token: A2, p_branch: "NDD Beta", p_stop: true });
+  await day("2026-11-26", false);
+  const k = await rpc("admin_kpi", { p_token: A2, p_month: "2026-11-01" }); assert.equal(k.branches.find((x) => x.branch === "NDD Beta").cells.find((c) => c.d === "2026-11-25").st, "nolist");
+});
+await t("daily is released only by that day's MB52; a late release moves the deadline", async () => {
+  const w = await rpc("plant_login", { p_code: "1501" }); assert.equal(w.wait, "release"); assert.notEqual(w.take.kind, "daily");
+  await rejects(rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-25", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) }), /today's MB52/);
+  await rpc("admin_load_daily", { p_token: A2, p_date: "2026-11-26", p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
+  await db.query("update public.snapshots set loaded_at = '2026-11-26 09:00:00+08' where snap_date = '2026-11-26'");
+  const r = await rpc("plant_login", { p_code: "1501" }); assert.equal(r.wait, null); assert.equal(r.take.kind, "daily");
+  assert.equal(r.take.countTo, "12:00", "window 06:30-09:30, released 09:00: 3 hours from the release");
+  assert.equal((await rpc("admin_dcc_today", { p_token: A2 })).rows.find((x) => x.branch === "NDD Alpha").to, "12:00");
+});
+await t("opening a monthly: a warehouse mid daily count blocks it, untouched daily lists go; stop & reset", async () => {
+  const TA = (await rpc("plant_login", { p_code: "1501" })).token;
+  await rpc("admin_dcc_day", { p_token: A2 });   // both lists exist
+  const s = await rpc("counter_start", { p_token: TA, p_device: "d-a", p_branch: "NDD Alpha", p_role: "ops", p_data: { member: "Ali", names: ["Ali"] } });
+  await rpc("admin_draft", { p_token: A2, p_name: "Reset me", p_scope: "total", p_skus: [] });
+  await rpc("admin_load_mb52", { p_token: A2, p_payload: mb52Payload(["NDD Alpha", "NDD Beta"]) });
+  await rejects(rpc("admin_set_status", { p_token: A2, p_status: "open" }), /NDD Alpha started today's daily count/);
+  await rpc("admin_stop_daily", { p_token: A2, p_branch: "NDD Alpha", p_stop: true });
+  await rpc("admin_set_status", { p_token: A2, p_status: "open" });
+  assert.equal((await db.query("select count(*)::int n from public.stock_takes where kind = 'daily' and count_date = '2026-11-26'")).rows[0].n, 0, "Beta's untouched list is gone");
+  assert.equal((await rpc("admin_dcc_day", { p_token: A2 })).rows.find((x) => x.branch === "NDD Beta").why, "monthly");
+  const m = await rpc("counter_start", { p_token: TA, p_device: "d-a", p_branch: "NDD Alpha", p_role: "ops", p_data: { member: "Ali", names: ["Ali"] } });
+  assert.notEqual(m.id, s.id);
+  await rejects(rpc("admin_reset_take", { p_token: TA, p_confirm: "Reset me" }), /login|admin/i);
+  await rejects(rpc("admin_reset_take", { p_token: A2, p_confirm: "reset" }), /Type the stock take name/);
+  const rr = await rpc("admin_reset_take", { p_token: A2, p_confirm: "Reset me" }); assert.equal(rr.take.status, "draft"); assert.equal(rr.sessions, 1);
+  assert.equal((await db.query("select count(*)::int n from public.count_sessions where id = $1", [m.id])).rows[0].n, 0);
+  assert.equal((await rpc("admin_load", { p_token: A2 })).takeInfo.skuCount >= 0, true, "MB52 and setup stay");
 });
 await t("KPI002: IRA by value from the month-end stock take; a SKU nobody counted counts as not found", async () => {
   const id = (await db.query("insert into public.stock_takes (name, kind, status, mode, scope, skus, opened_at, closed_at) values ('Month-end Nov', 'monthly', 'closed', 'single', 'total', '{}', '2026-11-29 08:00+08', '2026-11-29 18:00+08') returning id")).rows[0].id;

@@ -91,7 +91,7 @@ with sync_playwright() as p:
     print("counter before opening (draft)")
     op = phone(); op.goto(BASE + "/?api=local"); op.wait_for_selector("text=Start counting")
     code(op, "9999"); op.wait_for_selector("text=No warehouse with that plant code"); check("unknown plant code rejected", True)
-    code(op, "1501"); op.wait_for_selector("text=Counting hasn't started yet"); check("draft: counter told counting hasn't started", "NDD Alpha" in op.inner_text("main"))
+    code(op, "1501"); op.wait_for_selector("text=Today's list isn't ready yet"); check("no MB52 today, monthly still a draft: counter told to wait for HQ", "NDD Alpha" in op.inner_text("main") and "HQ hasn't uploaded today's stock" in op.inner_text("main"))
 
     print("owner: open counting")
     ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector("text=3. Upload the SAP MB52"); ow.click("main button:text-is('Continue')")
@@ -101,7 +101,7 @@ with sync_playwright() as p:
     check("home shows Open with progress table", ow.is_visible("text=Progress") and "NDD Alpha" in ow.inner_text("main"))
 
     print("ops phone")
-    op.click(B("Try again")); op.wait_for_selector("text=Your warehouse"); check("after opening: confirm screen shows warehouse", "NDD Alpha" in op.inner_text("main"))
+    op.click(B("Check again")); op.wait_for_selector("text=Your warehouse"); check("after opening: confirm screen shows warehouse", "NDD Alpha" in op.inner_text("main"))
     km = op.inner_text(".kind-monthly"); check("confirm: big MONTHLY label with the stock take name", "MONTHLY STOCK TAKE" in km and "Ops + Finance" in km, km)
     op.wait_for_selector("text=Which team are you?"); op.click(".big:has-text('Ops team counts')")
     op.wait_for_selector("text=Who is counting?"); op.click(".big:has-text('Ali Rahman')"); op.click(".big:has-text('Budi')"); op.click(B("Start ops count"))
@@ -272,6 +272,16 @@ with sync_playwright() as p:
     d3.value.save_as(f"{OUT}/single.xlsx"); ow.click(SB("OK"))
     with ow.expect_download() as d4: ow.click(B("Sign-off PDF"))
     d4.value.save_as(f"{OUT}/single.pdf"); ow.click(SB("OK")); check("single: Excel + PDF download", os.path.getsize(f"{OUT}/single.pdf") > 5000)
+
+    print("HQ: delete a count, stop & reset the monthly stock take")
+    ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector(".state.open"); ow.wait_for_selector(".mcard:has-text('NDD Alpha') >> text=Delete a count…")
+    ow.click(".mcard:has-text('NDD Alpha') >> text=Delete a count…"); ow.wait_for_selector("#sheet >> text=Delete a count · NDD Alpha")
+    check("monthly: delete list shows the count", "Ali Rahman" in ow.inner_text("#sheet"), ow.inner_text("#sheet")); ow.click(SB("Close"))
+    ow.click(B("Stop & reset…")); ow.wait_for_selector("#sheet >> text=Stop & reset this stock take?")
+    ow.fill("#sheet input", "single"); check("reset stays disabled until the exact name is typed", ow.is_disabled("#sheet button:text-is('Stop & reset')"))
+    ow.fill("#sheet input", "Single W5"); ow.click("#sheet button:text-is('Stop & reset')"); ow.wait_for_selector("text=Set up the stock take", timeout=10000)
+    check("reset: back to Draft (setup), counts gone", ow.is_visible("text=Set up the stock take") and not ow.is_visible(".state.open"))
+    op.reload(); op.wait_for_timeout(2500); check("counter phone: no open count any more", not op.is_visible(".chead"), op.inner_text("main")[:200])
 
     print("\npage errors:", errs or "none")
     print(f"\n{ok} passed, {bad} failed")

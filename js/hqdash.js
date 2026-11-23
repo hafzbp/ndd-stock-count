@@ -117,7 +117,9 @@ export function renderDash(app) {
     if (r.status === "skip") att.push(["", "Skipped", r.branch + " · " + (r.skipReason || "")]);
   });
   var nost = R.filter(function (r) { return r.status === "nostock"; }).map(function (r) { return r.branch.replace(/^NDD\s+/, ""); });
-  if (nost.length) att.push(["warn", "No stock data", nost.length + " warehouse" + (nost.length > 1 ? "s aren't" : " isn't") + " in any uploaded MB52: " + nost.join(", ")]);
+  if (nost.length) att.push(["warn", "Not in the MB52", nost.length + " warehouse" + (nost.length > 1 ? "s aren't" : " isn't") + " in today's MB52: " + nost.join(", ")]);
+  var wt = R.filter(function (r) { return r.status === "waiting"; }).length;
+  if (wt) att.push(["bad", "Today's MB52 isn't uploaded", wt + " warehouse" + (wt > 1 ? "s" : "") + " can't start today's daily count until HQ uploads it (Daily tab)"]);
   B.forEach(function (b) {
     var mi = (b.cells || []).filter(function (c) { return c.st === "missed"; }).length, ap = pct(b.ok, b.counted);
     if (mi) att.push(["bad", "Missed", b.branch + " · " + mi + " day" + (mi > 1 ? "s" : "") + " in this period"]);
@@ -133,10 +135,10 @@ export function renderDash(app) {
   app.append(ac);
 
   /* ---- today per warehouse ---- */
-  var order = { todo: 0, missed: 0, progress: 1, late: 2, ontime: 3, skip: 4, monthly: 5, nostock: 5, off: 6, nothing: 6 };
+  var order = { waiting: 0, todo: 0, missed: 0, progress: 1, late: 2, ontime: 3, skip: 4, stopped: 4, monthly: 5, nostock: 5, off: 6, nothing: 6 };
   var tt = table(["Warehouse", "Window", "MB52", "Started", "Submitted", "Took", "SKUs", "OK", "Over", "Counted by", "Status"], 5);
   R.slice().sort(function (a, b) { return (order[a.status] - order[b.status]) || a.branch.localeCompare(b.branch); }).forEach(function (r) {
-    var s = ST[r.status] || [{ monthly: "Monthly stock take", nostock: "No stock data", nothing: "Nothing due" }[r.status] || r.status, "off"];
+    var s = ST[r.status] || [{ monthly: "Monthly stock take", nostock: "Not in the MB52", nothing: "Nothing due", waiting: "Waiting for HQ", stopped: "Stopped by HQ" }[r.status] || r.status, "off"];
     var res = r.result || {}, stale = r.snapDate && r.snapDate < T.date;
     tt.append(el("tr", {}, el("td", { text: r.branch }), el("td", { class: "muted", text: r.from + "-" + r.to }),
       el("td", { class: stale ? "neg" : "muted", text: r.snapDate ? shortDate(r.snapDate) : "-" }),

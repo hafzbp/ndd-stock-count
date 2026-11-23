@@ -174,6 +174,7 @@ async function tick() {
     /* the daily list can grow during the day (supervisor adds SKUs): keep the counter's list current */
     var cm0 = cur(); if (cm0 && S.tab === "count" && S.tokens[cm0.branch]) { var before = JSON.stringify((S.br[cm0.branch] || {}).codes || []); try { await loadBranch(cm0.branch); if (JSON.stringify((S.br[cm0.branch] || {}).codes || []) !== before) changed = true; } catch (e) { } }
     if (S.saveErr && S.saveErr !== "PIN") { S.saveErr = null; flush(); }
+    if (S.goneNote) { S.goneNote = false; closeModal(); var sv = document.getElementById("skuv"); if (sv) { sv.remove(); document.body.classList.remove("noscroll"); } S.openSku = null; render(); msg("Count removed by HQ", "HQ deleted this count or stopped today's count. Enter the plant code to see what to do next."); }
     if (changed && S.tab === "count" && !document.querySelector("#modal.on") && !document.querySelector(".ssheet") && !document.querySelector(".scanov") && !document.querySelector("#skuv")) render();
     if (isAdmin() && (S.tab === "master" || (S.tab === "home" && S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open")) && !document.querySelector("#modal.on")) { await loadAdmin(); render(); }
     if (isAdmin() && S.tab === "daily" && S.dcc && S.dcc.date === S.dcc.today && !document.querySelector("#modal.on") && !document.activeElement.matches("input,select")) { S.dcc = null; render(); }

@@ -10,6 +10,7 @@ import { hasQty, sessRole } from "./pure.js";
 import { loadAdmin, variance, branchesAdm } from "./master.js";
 import { mb52Card } from "./setup.js";
 import { exportXlsx } from "./export.js";
+import { deleteCountsModal, resetTake } from "./hqreset.js";
 
 function tok() { return S.admin.token; }
 function info() { return (S.adm && S.adm.takeInfo) || {}; }
@@ -55,7 +56,9 @@ function progressTable() {
       el("div", { class: "small num", style: "margin-top:3px", text: x.n + " / " + exp + " SKUs · " + x.photos + " photo" + (x.photos === 1 ? "" : "s") }));
   };
   rows.forEach(function (r) {
-    box.append(el("div", { class: "mcard" }, el("b", { text: r.b }), sg ? line("Count", r.all, r.exp) : [line("Ops count", r.ops, r.exp), line("Finance check", r.fin, r.exp)]));
+    var mine = (S.counts || []).filter(function (d) { return d.branch === r.b; });
+    box.append(el("div", { class: "mcard" }, el("b", { text: r.b }), sg ? line("Count", r.all, r.exp) : [line("Ops count", r.ops, r.exp), line("Finance check", r.fin, r.exp)],
+      mine.length ? el("button", { class: "link", style: "align-self:flex-start;font-size:13px", text: "Delete a count…", onclick: function () { deleteCountsModal(r.b, mine, function () { loadAdmin().then(hooks.render); }); } }) : null));
   });
   if (!rows.length) box.append(el("p", { class: "muted", text: "No warehouse has SKUs to count yet." }));
   return box;
@@ -210,6 +213,7 @@ function renderOpen(app, t) {
         el("button", { class: "btn primary", text: "Check results and recounts", onclick: function () { S.tab = "master"; hooks.render(); window.scrollTo(0, 0); } }),
         el("button", { class: "btn", text: "Message for warehouses", onclick: function () { openModal(function (sh) { sh.append(el("h3", { text: "Message for the warehouses" }), messageBox(), el("button", { class: "btn block", style: "margin-top:10px", text: "Close", onclick: closeModal })); }); } }),
         el("button", { class: "btn", text: "Replace MB52", onclick: function () { openModal(function (sh) { sh.append(mb52Card("Replace the MB52", function () { closeModal(); hooks.render(); }), el("button", { class: "btn block", text: "Cancel", onclick: closeModal })); }); } }),
+        el("button", { class: "btn", style: "color:var(--bad)", text: "Stop & reset…", title: "Delete every count and go back to Draft", onclick: function () { resetTake(t, function () { loadAdmin().then(function () { hooks.render(); window.scrollTo(0, 0); }); }); } }),
         el("button", { class: "btn", style: "color:var(--bad)", text: "Close counting", onclick: function () {
           var open = rows.filter(function (r) { return !done(r); }).map(function (r) { return r.b; });
           confirmBox("Close counting?", (open.length ? "Not everyone has submitted yet: " + open.join(", ") + ".\n\n" : "") + "Counters can't change anything after this. Results, Excel, sign-off PDFs and the dashboard variance use what is saved now. You can reopen later.", "Close", async function () {

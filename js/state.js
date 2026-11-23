@@ -90,7 +90,7 @@ export function applySync(res) {
   var open = {}; Object.keys(S.tokens).forEach(function (b) { open[b] = 1; });
   Object.keys(S.mine.sessions).forEach(function (id) {
     var x = S.mine.sessions[id];
-    if (!seen[id] && !x.dirty && (isAdmin() || open[x.branch])) { delete S.mine.sessions[id]; changed = true; if (S.mine.active === id) S.mine.active = null; }
+    if (!seen[id] && !x.dirty && (isAdmin() || open[x.branch])) { delete S.mine.sessions[id]; changed = true; if (S.mine.active === id) { S.mine.active = null; if (!isAdmin()) S.goneNote = true; } }
   });
   var rc = res.recount || {};
   if (JSON.stringify(rc) !== JSON.stringify(S.recount)) changed = true;
@@ -135,7 +135,7 @@ export async function flush() {
     } catch (e) {
       S.saving = false;
       if (e.code === "AUTH") { delete S.tokens[m.branch]; saveTokens(); S.saveErr = "PIN"; syncPill(); if (hooks.needPin) hooks.needPin(m.branch); return; }
-      if (e.code === "GONE") { delete S.mine.sessions[m.id]; if (S.mine.active === m.id) S.mine.active = null; backup(); msg("Count removed", "This count was cleared by the owner. Start again."); hooks.render(); return; }
+      if (e.code === "GONE") { delete S.mine.sessions[m.id]; if (S.mine.active === m.id) S.mine.active = null; backup(); msg("Count removed", "HQ deleted this count. Start again from the plant code."); hooks.render(); return; }
       S.saveErr = e.code || "ERR"; syncPill(); schedule(3000 + Math.random() * 3000); return;
     }
   }

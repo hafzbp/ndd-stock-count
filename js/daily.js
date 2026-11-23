@@ -2,7 +2,8 @@
 import { S, hooks } from "./state.js";
 import { rpc } from "./api.js";
 import { el, fmt, tsTxt, msg, errText, openModal, closeModal } from "./ui.js";
-import { loadAdmin } from "./master.js";
+import { loadAdmin, docsFrom } from "./master.js";
+import { deleteCountsModal, stopDaily } from "./hqreset.js";
 import { mb52Card } from "./setup.js";
 import { dayStatus, clsTag, renderDccStats } from "./dcc.js";
 import { exportDailyReport, dailyPdf, dailySkus, dailyTotals } from "./export.js";
@@ -26,13 +27,15 @@ export function renderDaily(app) {
   if ((S.adm && S.adm.settings && S.adm.settings.dcc_enabled) === false) app.append(el("div", { class: "banner warn" }, "Daily counts are switched off (Settings → Daily cycle count)."));
 
   /* daily stock upload */
-  var di = el("input", { type: "date", value: today, max: today, style: "max-width:170px" });
-  var stale = !snap || snap.date < addDays(today, -1);
-  app.append(mb52Card("Daily stock (MB52)", function () { S.dcc = null; hooks.render(); }, { daily: {
-    date: function () { return di.value || today; },
-    info: snap ? "Latest: stock date " + niceDate(snap.date) + " · uploaded " + tsTxt(snap.loadedAt) : "No daily stock uploaded yet - daily counts start after the first upload.",
-    extra: el("div", {}, stale ? el("div", { class: "banner warn", style: "margin:6px 0" }, snap ? "The latest stock is older than yesterday. Upload today's MB52 so counts compare to current stock." : "Upload the MB52 to start daily counts.") : null,
-      el("div", { class: "row", style: "margin:6px 0" }, el("span", { class: "small", text: "Stock date (the day the MB52 was pulled)" }), di)) } }));
+  /* daily counts are released by HQ's MB52 of the day: the file must be today's */
+  var released = snap && snap.date === today;
+  app.append(mb52Card("Daily stock (MB52)", function () { S.dcc = null; S.todayT = null; hooks.render(); }, { daily: {
+    date: function () { return today; },
+    info: snap ? "Latest: stock date " + niceDate(snap.date) + " · uploaded " + tsTxt(snap.loadedAt) : "No daily stock uploaded yet.",
+    extra: el("div", {}, released
+      ? el("div", { class: "banner ok", style: "margin:6px 0" }, "Today's daily counts are released (MB52 uploaded " + tsTxt(snap.loadedAt) + "). A corrected file replaces today's system stock.")
+      : el("div", { class: "banner warn", style: "margin:6px 0" }, "Not released yet: warehouses can't start today's daily count. Upload the MB52 to start daily counts - pull it today (stock date " + niceDate(today) + ")."),
+      el("div", { class: "small muted", style: "margin:4px 0 6px" }, "Stock date: today, " + niceDate(today) + ". Released late? Each warehouse still gets its full window length from the upload.")) } }));
 
   /* day overview */
   var rows = D.rows || [], st = rows.map(function (r) { return dayStatus(r, d, today); });
@@ -65,8 +68,14 @@ export function renderDaily(app) {
 function detailPanel(r, s, d) {
   var tk = r.take, key = d + "|" + r.branch, c = el("div", { class: "card detail" });
   c.append(el("div", { class: "small muted", text: niceDate(d) }), el("h3", { style: "margin:2px 0 6px;font-size:18px", text: r.branch }), el("span", { class: "pill " + s.c, text: s.t }));
-  if (!tk) { c.append(el("p", { class: "muted small", text: s.t === "Off day" ? "Not a working day for this warehouse." : "No daily list for this day." }),
-    el("div", { class: "dacts" }, el("button", { class: "btn", text: "ABC plan", onclick: function () { showAbc(r.branch, tok()); } }))); return c; }
+  var isToday = d === S.dcc.today, refresh = function () { S.dcc = null; S.dailyDet = null; S.todayT = null; hooks.render(); };
+  if (!tk) {
+    c.append(el("p", { class: "muted small", text: r.why === "waiting" ? "Waiting for HQ: upload today's MB52 (above) to release today's daily counts." : r.why === "stopped" ? "HQ stopped today's count here. The day doesn't count in KPI001."
+      : r.why === "norelease" ? "HQ didn't upload the MB52 that day - not counted in KPI001." : s.t === "Off day" ? "Not a working day for this warehouse." : "No daily list for this day." }));
+    c.append(el("div", { class: "dacts" }, isToday && r.why === "stopped" ? el("button", { class: "btn primary", text: "Resume count", onclick: function () { stopDaily(r.branch, false, refresh); } }) : null,
+      el("button", { class: "btn", text: "ABC plan", onclick: function () { showAbc(r.branch, tok()); } })));
+    return c;
+  }
   var D = S.dailyDet && S.dailyDet.key === key ? S.dailyDet : null;
   if (!D) {
     c.append(el("p", { class: "muted small", text: "Loading…" }));
@@ -94,6 +103,13 @@ function detailPanel(r, s, d) {
     el("button", { class: "btn", text: "View counts", onclick: function () { S.viewTake = tk.id; S.mBranch = r.branch; S.tab = "master"; loadAdmin().then(hooks.render); window.scrollTo(0, 0); } }),
     el("button", { class: "btn", text: "List", onclick: function () { showList(r); } }),
     el("button", { class: "btn", text: "ABC", onclick: function () { showAbc(r.branch, tok()); } })));
+  /* something went wrong mid-count (a bug, the wrong warehouse): HQ can delete a count or stop today's count */
+  if (isToday) c.append(el("div", { class: "dacts", style: "border-top:1px solid var(--line);padding-top:10px" },
+    el("button", { class: "btn", text: "Delete a count…", onclick: async function () {
+      try { var a = await rpc("admin_load", { p_token: tok(), p_take: tk.id }); deleteCountsModal(r.branch, docsFrom(a.sessions).filter(function (x) { return x.branch === r.branch; }), refresh); }
+      catch (e) { msg("Can't load the counts", errText(e)); }
+    } }),
+    el("button", { class: "btn", style: "color:var(--bad)", text: "Stop count", onclick: function () { stopDaily(r.branch, true, refresh); } })));
   return c;
 }
 

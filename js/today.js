@@ -38,6 +38,8 @@ function stateOf(r, T) {
   if (r.status === "off") return { k: "off", rank: 9, t: "Off day", c: "" };
   if (r.status === "missed") return { k: "risk", rank: 0, t: "Missed", c: "bad" };
   if (r.status === "nostock") return { k: "nol", rank: 3, t: "Not in the MB52", c: "warn" };
+  if (r.status === "waiting") return { k: "wait", rank: 1, t: "Waiting for HQ", c: "warn" };
+  if (r.status === "stopped") return { k: "stop", rank: 7, t: "Stopped by HQ", c: "" };
   return { k: "nil", rank: 8, t: "Nothing due", c: "" };
 }
 
@@ -70,10 +72,10 @@ export function renderToday(app) {
     return el("div", { class: "ck " + state }, el("div", { class: "ckh" }, el("span", { class: "ckd" }, state === "ok" ? svg(ICON.check, 14) : "!"), el("b", { text: title })),
       lines.map(function (l) { return el("div", { class: l[1] || "small", text: l[0] }); }), link || null);
   }
-  var mbOk = upToday && !noList.length;
+  var mbOk = upToday && !noList.length, waiting = rows.filter(function (r) { return r.s.k === "wait"; });
   ck.append(check(mbOk ? "ok" : "warn", "Today's MB52", [
-    [snap.date ? (upToday ? "Loaded · stock date today" : "Latest stock date " + snap.date) : "No daily stock uploaded yet", "small"],
-    noList.length ? [noList.map(function (r) { return r.branch.replace(/^NDD\s+/i, ""); }).join(", ") + (noList.length > 1 ? " are" : " is") + " missing from the stock file", "small warnt"] : [upToday ? "Every working warehouse has a list" : "Counts compare to old stock until today's file is in", "small muted"]],
+    [upToday ? "Released · uploaded " + hhmm(snap.loadedAt) : "Not uploaded yet - daily counts are not released", upToday ? "small" : "small warnt"],
+    noList.length ? [noList.map(function (r) { return r.branch.replace(/^NDD\s+/i, ""); }).join(", ") + (noList.length > 1 ? " are" : " is") + " missing from the stock file", "small warnt"] : [upToday ? "Every working warehouse has a list" : waiting.length + " warehouse" + (waiting.length === 1 ? "" : "s") + " waiting - they can't start until it's in", "small muted"]],
     !mbOk ? el("button", { class: "link strong", text: upToday ? "Upload a corrected file" : "Upload today's MB52", onclick: function () { S.tab = "daily"; hooks.render(); } }) : null));
   var listed = due.reduce(function (a, r) { return a + (r.listed || 0); }, 0), lists = due.filter(function (r) { return r.listed; }).length;
   var minS = (S.todayKpi && S.todayKpi.minSkus) || 10, small = due.filter(function (r) { return r.listed && r.listed < minS; }).length;
@@ -88,7 +90,7 @@ export function renderToday(app) {
   app.append(ck);
 
   /* numbers */
-  var stats = [[due.length, "Due today", ""], [n(["ok", "late"]), "Submitted", "okt"], [n(["cnt", "over"]), "Counting", "infot"], [n(["nos", "risk"]), "Not started", n(["risk"]) ? "badt" : ""], [noList.length, "No list", noList.length ? "warnt" : ""]];
+  var stats = [[due.length, "Due today", ""], [n(["ok", "late"]), "Submitted", "okt"], [n(["cnt", "over"]), "Counting", "infot"], [n(["nos", "risk"]), "Not started", n(["risk"]) ? "badt" : ""], [waiting.length || noList.length, waiting.length ? "Waiting for HQ" : "No list", waiting.length || noList.length ? "warnt" : ""]];
   app.append(el("div", { class: "statrow" }, stats.map(function (x) { return el("div", { class: "stat2" }, el("b", { class: "num " + x[2], text: String(x[0]) }), el("span", { text: x[1] })); })));
 
   /* warehouses + attention */
@@ -106,6 +108,7 @@ export function renderToday(app) {
 
   var side = el("div", { class: "side" });
   var att = [];
+  if (waiting.length) att.push(["bad", "Today's MB52 isn't uploaded", waiting.length + " warehouse" + (waiting.length === 1 ? "" : "s") + " can't start counting", "Upload it in Daily to release today's counts"]);
   rows.forEach(function (r) {
     if (r.s.k === "risk") att.push(["bad", r.branch + (r.status === "missed" ? " missed today" : " hasn't started"), r.s.t, "Supervisor can send the WhatsApp reminder"]);
     if (r.s.k === "over") att.push(["bad", r.branch + " still counting", "Window ended " + r.to + " · " + (r.counted || 0) + " / " + r.listed + " SKUs", "Will show as late"]);

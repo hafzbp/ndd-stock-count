@@ -73,8 +73,8 @@ export function renderSup(app) {
   else app.append(guide(D, s));
 
   if (!ti) {
-    app.append(el("div", { class: "card center" }, el("h2", { text: D.monthlyOpen ? "Monthly stock take is open" : "Nothing to count" }),
-      el("p", { class: "muted", text: D.monthlyOpen ? "Daily counts pause while the monthly stock take is open at this warehouse." : "No daily count is planned for this day (off day, no stock data from HQ yet, or nothing due)." })));
+    app.append(el("div", { class: "card center" }, el("h2", { text: D.wait === "release" ? "Waiting for HQ" : D.wait === "stopped" ? "HQ stopped today's count" : D.monthlyOpen ? "Monthly stock take is open" : "Nothing to count" }),
+      el("p", { class: "muted", text: D.wait === "release" ? "Today's list comes when HQ uploads today's stock (MB52)." : D.wait === "stopped" ? "No daily count at " + D.branch + " today." : D.monthlyOpen ? "Daily counts pause while the monthly stock take is open at this warehouse." : "No daily count is planned for this day (off day or nothing due)." })));
   } else {
     var plan = ti.plan || {}, sm = {}; (D.skus || []).forEach(function (k) { sm[k.code] = k; });
     var V = variance((D.sys || {})[D.branch] || [], docs, sm, Number((D.settings || {}).tolerance) || 2, true);
@@ -153,8 +153,10 @@ function guide(D, s) {
   var c = el("div", { class: "card guide" }, el("h3", { text: "What to do today" }));
   function steps(list) { c.append(el("ol", { class: "steps-ol" }, list.map(function (x) { return el("li", {}, x); }))); }
   if (!ti) {
-    c.append(el("p", { text: D.monthlyOpen ? "The monthly stock take is open, so there is no daily count today. Your team counts the monthly stock take instead." :
-      "Nothing to count today (off day, nothing due, or HQ hasn't uploaded today's stock yet). Nothing for you to do." }));
+    c.append(el("p", { text: D.wait === "release" ? "Waiting for HQ: today's stock (MB52) isn't uploaded yet, so there is no list. Your team can't start counting until HQ uploads it - tap ↻ to check again."
+      : D.wait === "stopped" ? "HQ stopped today's count at " + D.branch + ". Nothing to count today - ask HQ if this is a mistake."
+      : D.monthlyOpen ? "The monthly stock take is open, so there is no daily count today. Your team counts the monthly stock take instead." :
+      "Nothing to count today (off day or nothing due). Nothing for you to do." }));
   } else if (ti.skipReason) {
     c.append(el("p", { text: "Today's count was skipped: " + ti.skipReason + ". The SKUs move to the next working days." }));
   } else if (s.t === "On time" || s.t === "Late") {

@@ -46,7 +46,7 @@ export function plantPad(title, sub, wantBranch, onOk, inline) {
       var r = await rpc("plant_login", { p_code: v });
       if (!r.ok) { v = ""; draw(); err.textContent = "No warehouse with that plant code"; return; }
       if (wantBranch && r.branch !== wantBranch) { v = ""; draw(); err.textContent = "That code is for " + r.branch + ", not " + wantBranch; return; }
-      S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null; S.lastLogin = { code: v, branch: r.branch };
+      S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null; S.lastLogin = { code: v, branch: r.branch }; S.waitBy = S.waitBy || {}; S.waitBy[r.branch] = r.wait || null;
       if (r.take) S.take = Object.assign({}, S.take || {}, r.take);
       if (!inline) closeModal();
       await loadMaster().catch(function () { });
@@ -81,7 +81,7 @@ export async function loadBranch(br) {
   var tok = tokenFor(br); if (!tok) return;
   try {
     var r = await rpc("counter_branch", { p_token: tok, p_branch: br });
-    S.br[br] = r; S.recount[br] = r.recount || [];
+    S.br[br] = r; S.recount[br] = r.recount || []; S.waitBy = S.waitBy || {}; S.waitBy[br] = r.wait || null;
     store("ndd2-br", S.br);
   } catch (e) {
     if (e.code === "AUTH") { delete S.tokens[br]; saveTokens(); }
@@ -576,12 +576,24 @@ function renderStart(app) {
     el("button", { class: "iconbtn", "aria-label": "Different warehouse", onclick: reset }, svg(ICON.back, 22)),
     el("div", {}, el("div", { class: "rt", text: st.branch }), el("div", { class: "small muted", text: "Your warehouse" })));
   app.append(top);
+  var wt = (S.waitBy || {})[st.branch];
+  if (wt) {
+    /* daily counts are released by HQ's MB52 of the day; HQ can also stop a warehouse's count */
+    app.append(el("div", { class: "card center waitcard" },
+      el("div", { class: "gateic", style: "margin:0 auto 10px" }, wt === "stopped" ? "⏹" : "⏳"),
+      el("h2", { text: wt === "stopped" ? "HQ stopped today's count" : "Today's list isn't ready yet" }),
+      el("p", { class: "muted", text: wt === "stopped" ? "There is no daily count at " + st.branch + " today. Ask HQ if this is a mistake." : "HQ hasn't uploaded today's stock (MB52) yet. You can start as soon as it's in." }),
+      el("div", { class: "row", style: "justify-content:center" },
+        el("button", { class: "btn primary", text: "Check again", onclick: async function (e) { var bt = e.currentTarget; bt.disabled = true; bt.textContent = "Checking…"; try { await loadBranch(st.branch); S.take = (S.br[st.branch] || {}).take || S.take; } catch (x) { } hooks.render(); } }),
+        el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
+    return;
+  }
   if (ts !== "open") {
     app.append(el("div", { class: "card center" },
       el("h2", { text: S.notOpenMsg ? (ts === "draft" ? "Nothing to count right now" : "Today's count is closed") : ts === "draft" ? "Counting hasn't started yet" : "Counting is closed" }),
       el("p", { class: "muted", text: S.notOpenMsg || (ts === "draft" ? "Your admin will open the stock take. Try again when they tell you it's open." : "This stock take is finished. Ask your admin if something still needs counting.") }),
       el("div", { class: "row", style: "justify-content:center" },
-        el("button", { class: "btn primary", text: "Try again", onclick: async function () { S.notOpenMsg = ""; try { var bd = await rpc("counter_branch", { p_token: S.tokens[st.branch], p_branch: st.branch }); S.take = bd.take; } catch (e) { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e2) { } } hooks.render(); } }),
+        el("button", { class: "btn primary", text: "Try again", onclick: async function () { S.notOpenMsg = ""; try { var bd = await rpc("counter_branch", { p_token: S.tokens[st.branch], p_branch: st.branch }); S.take = bd.take; S.waitBy = S.waitBy || {}; S.waitBy[st.branch] = bd.wait || null; } catch (e) { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e2) { } } hooks.render(); } }),
         el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
     return;
   }
@@ -649,7 +661,7 @@ function renderStart(app) {
     } catch (e) {
       startBtn.disabled = false;
       if (e.code === "AUTH") { delete S.tokens[pickBr]; saveTokens(); withPin(pickBr, go); return; }
-      if (e.code === "NOT_OPEN" || e.code === "CLOSED") { var em = String(e.message || ""); S.notOpenMsg = /Nothing to count|skipped/.test(em) ? em.replace(/^(NOT OPEN|CLOSED):\s*/, "") : ""; S.take = Object.assign({}, S.take || {}, { status: e.code === "CLOSED" ? "closed" : "draft" }); st.step = "confirm"; hooks.render(); return; }
+      if (e.code === "NOT_OPEN" || e.code === "CLOSED") { var em = String(e.message || ""); S.notOpenMsg = /Nothing to count|skipped/.test(em) ? em.replace(/^(NOT OPEN|CLOSED):\s*/, "") : ""; S.take = Object.assign({}, S.take || {}, { status: e.code === "CLOSED" ? "closed" : "draft" }); st.step = "confirm"; await loadBranch(pickBr).catch(function () { }); hooks.render(); return; }
       msg(e.code === "NOT_ALLOWED" ? "Not allowed" : "Can't start", errText(e));
     }
   }

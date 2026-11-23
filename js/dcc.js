@@ -6,11 +6,11 @@ export var ST = {
   ontime: ["On time", "ok"], late: ["Late", "warn"], missed: ["Missed", "bad"], progress: ["Counting", "warn"], todo: ["Not started", ""],
   skip: ["Skipped", "skip"], off: ["Off day", "off"], none: ["Nothing due", "off"], future: ["", "off"]
 };
-var WHY = { off: "Off day", monthly: "Monthly stock take", nostock: "No stock data", nothing: "Nothing due" };
+var WHY = { off: "Off day", monthly: "Monthly stock take", nostock: "Not in the MB52", nothing: "Nothing due", waiting: "Waiting for HQ", stopped: "Stopped by HQ", norelease: "Not released (HQ)" };
 
 /* status of one warehouse on one day, from admin_dcc_day / sup_day data */
 export function dayStatus(r, date, today) {
-  if (!r.take) return { t: WHY[r.why] || "Nothing due", c: "" };
+  if (!r.take) return { t: WHY[r.why] || "Nothing due", c: r.why === "waiting" || r.why === "nostock" ? "warn" : "" };
   if (r.take.skipReason) return { t: "Skipped · " + r.take.skipReason, c: "" };
   if (r.submittedAt) return r.late ? { t: "Late", c: "warn" } : { t: "On time", c: "ok" };
   if (date < today) return { t: "Missed", c: "bad" };
