@@ -8,6 +8,8 @@ import { renderSetup } from "./setup.js";
 import { renderHome } from "./home.js";
 import { renderDaily, renderDash } from "./daily.js";
 import { renderSup, supLogin, supLogout, loadSupTok } from "./sup.js";
+import { renderToday } from "./today.js";
+import { svg, ICON } from "./count.js";
 import { sessRole } from "./pure.js";
 
 function setHH() { var h = document.querySelector("header"); if (h) document.documentElement.style.setProperty("--hh", h.offsetHeight + "px"); }
@@ -22,7 +24,9 @@ function render() {
   if (!S.cfg) return;
   var app = $("#app"); app.innerHTML = ""; $("#foot").classList.add("hidden");
   if (inAppGate(app)) return;
-  if (S.tab === "daily" && isAdmin()) renderDaily(app);
+  document.body.classList.toggle("adminui", isAdmin() && S.tab !== "count");
+  if (S.tab === "today" && isAdmin()) renderToday(app);
+  else if (S.tab === "daily" && isAdmin()) renderDaily(app);
   else if (S.tab === "dash" && isAdmin()) renderDash(app);
   else if (S.tab === "sup" && supMode()) renderSup(app);
   else if (S.tab === "home" && isAdmin()) renderHome(app);
@@ -41,10 +45,12 @@ function drawHeader() {
   var tabs = $("#tabs"); tabs.innerHTML = "";
   if (isAdmin()) {
     tabs.classList.remove("hidden");
-    [["daily", "Daily"], ["home", "Monthly"], ["master", "Master"], ["dash", "Dashboard"], ["setup", "Settings"], ["count", "Count"]].forEach(function (t) {
-      tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", text: t[1], onclick: function () {
-        S.tab = t[0]; if (t[0] === "home" || t[0] === "daily") S.viewTake = null; if (t[0] === "daily") S.dcc = null; if (t[0] === "dash") S.dashData = null;
-        if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }));
+    var IC = { today: ICON.home, daily: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', home: '<path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 17l8 4 8-4"/>',
+      master: '<path d="M4 6h16M4 12h16M4 18h10"/>', dash: '<path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/>', setup: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>', count: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1h11"/>' };
+    [["today", "Today"], ["daily", "Daily"], ["home", "Monthly"], ["master", "Master"], ["dash", "Dashboard"], ["setup", "Settings"], ["count", "Count"]].forEach(function (t) {
+      tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", "aria-current": S.tab === t[0] ? "page" : null, onclick: function () {
+        S.tab = t[0]; if (t[0] === "home" || t[0] === "daily") S.viewTake = null; if (t[0] === "daily") S.dcc = null; if (t[0] === "dash") S.dashData = null; if (t[0] === "today") S.todayAt = null;
+        if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }, svg(IC[t[0]], 18), t[1]));
     });
   } else if (supMode()) {
     tabs.classList.remove("hidden");
@@ -57,7 +63,7 @@ function drawHeader() {
   $("#dashBtn").style.display = cm || isAdmin() ? "none" : "";
   if (supMode()) { lk.replaceChildren("Log out"); lk.title = "Log out of the supervisor view"; }
   else if (cm) { lk.replaceChildren("Log out"); lk.title = "Log out of " + cur().branch + " (your counts stay saved)"; }
-  else { lk.replaceChildren(isAdmin() ? "🔓" : "🔒", el("span", { class: "lbl", text: isAdmin() ? " Log out" : " Admin" })); lk.title = isAdmin() ? "Log out" : "Admin login"; }
+  else { lk.replaceChildren(svg(isAdmin() ? '<path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3"/><path d="M10 17l5-5-5-5M15 12H4"/>' : '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>', 16), el("span", { class: "lbl", text: isAdmin() ? " Log out" : " Admin" })); lk.title = isAdmin() ? "Log out" : "Admin login"; }
 }
 /* a counter is inside a count on this phone: header shows only Log out */
 /* also without a plant-code login (e.g. a count opened while logged in as admin): there must always be a way out */
@@ -106,12 +112,12 @@ function onLockBtn() {
         if (!r.ok) { err.textContent = "Wrong password"; i.value = ""; return; }
         S.admin = { token: r.token, kind: r.kind }; saveTokens(); closeModal();
         S.dcc = null; S.viewTake = null; await loadAdmin(); await loadMaster().catch(function () { });
-        S.tab = S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open" ? "home" : "daily"; render();
+        S.tab = S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open" ? "home" : "today"; S.todayT = null; render();
       } catch (e) { err.textContent = errText(e); }
       finally { go.disabled = false; }
     } });
     i.addEventListener("keydown", function (e) { if (e.key === "Enter") go.click(); });
-    sh.append(el("h3", { text: "🔒 Admin" }), el("p", { class: "muted small", text: "Enter the admin password (or the owner password) to set up and run stock takes." }), i, err,
+    sh.append(el("h3", { text: "Admin login" }), el("p", { class: "muted small", text: "Enter the admin password (or the owner password) to set up and run stock takes." }), i, err,
       el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }), go),
       S.cfg && !S.cfg.ownerReady ? el("button", { class: "link", style: "margin-top:10px", text: "First time? Set the owner password with the setup code", onclick: bootstrap }) : null);
     setTimeout(function () { i.focus(); }, 100);

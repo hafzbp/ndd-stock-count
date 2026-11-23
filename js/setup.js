@@ -100,7 +100,7 @@ export function renderSetup(app) {
   var A = S.adm, st = A.settings || {}, tk = currentTake();
   app.append(el("div", { class: "banner warn", text: "Admin only. Settings that stay the same between stock takes. Counters never see system quantities." }));
   if (S.meta && S.meta.length !== (A.branches || []).filter(function (b) { return b.active; }).length) S.meta = null;   // warehouses added by an MB52 upload since
-  app.append(dccCard(A, st), holidayCard(A), metaCard());
+  app.append(warehousesCard(A), dccCard(A, st), holidayCard(A));
 
   /* 2. factors */
   var fa = el("textarea", { placeholder: "Item Code\tPcs per CTN\tPcs per BOX\n650505\t240\t24" });
@@ -196,7 +196,7 @@ export function renderSetup(app) {
 
   var fp = el("input", { type: "text", placeholder: A.financeReady ? "•••••• (set - type a new one to change)" : "not set", style: "max-width:260px", autocomplete: "off" });
   app.append(el("div", { class: "card" }, el("h3", { text: "Admin password" }),
-    el("p", { class: "small muted", text: "For other admins (for example Finance HQ): they tap 🔒 Admin and enter this. They can run stock takes but can't change passwords or download backups. Changing it logs out everyone who used the old one. Stored only as a hash - note it before saving. Blank + Save = turn off this login." }),
+    el("p", { class: "small muted", text: "For other admins (for example Finance HQ): they tap Admin (top right) and enter this. They can run stock takes but can't change passwords or download backups. Changing it logs out everyone who used the old one. Stored only as a hash - note it before saving. Blank + Save = turn off this login." }),
     el("div", { class: "row" }, fp, el("button", { class: "btn", text: "Generate", onclick: function () { var c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", o = ""; for (var i = 0; i < 10; i++) o += c[Math.floor(Math.random() * c.length)]; fp.value = o; } }),
       el("button", { class: "btn primary", text: "Save", onclick: function () {
         var v = fp.value.trim(); if (v && v.length < 6) { msg("Use at least 6 characters"); return; }
@@ -276,35 +276,8 @@ function renderTeam(app) {
 
 /* Daily cycle count: rules, working days and count window per warehouse, supervisor PINs. */
 var WD = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"]];
-/* Region and national operation manager per warehouse: dashboard filters. */
-function metaCard() {
-  var c = el("div", { class: "card" }, el("h3", { text: "Region and national operation manager" }),
-    el("p", { class: "small muted", text: "Used to filter the dashboard. Type the same spelling for warehouses that belong together; earlier values are suggested." }));
-  if (!S.meta) {
-    c.append(el("p", { class: "muted small", text: "Loading…" }));
-    if (S.metaLoading) return c; S.metaLoading = true;
-    rpc("admin_branch_meta", { p_token: tok() }).then(function (r) { S.meta = r; S.metaLoading = false; hooks.render(); }, function (e) { S.metaLoading = false; c.append(el("p", { class: "small", style: "color:var(--bad)", text: errText(e) })); });
-    return c;
-  }
-  var uniq = function (k) { var o = {}; S.meta.forEach(function (x) { if (x[k]) o[x[k]] = 1; }); return Object.keys(o).sort(); };
-  var dlR = el("datalist", { id: "dl-region" }, uniq("region").map(function (v) { return el("option", { value: v }); }));
-  var dlN = el("datalist", { id: "dl-nom" }, uniq("nom").map(function (v) { return el("option", { value: v }); }));
-  var t = el("table", {}, el("tr", {}, ["Warehouse", "Region", "National operation manager", ""].map(function (h) { return el("th", { text: h }); })));
-  S.meta.forEach(function (m) {
-    var r = el("input", { value: m.region || "", placeholder: "e.g. Central", list: "dl-region", style: "min-width:130px" });
-    var n = el("input", { value: m.nom || "", placeholder: "Name", list: "dl-nom", style: "min-width:150px" });
-    t.append(el("tr", {}, el("td", { text: m.branch }), el("td", {}, r), el("td", {}, n),
-      el("td", {}, el("button", { class: "btn", text: "Save", onclick: async function () {
-        try { S.meta = await rpc("admin_branch_meta", { p_token: tok(), p_branch: m.branch, p_region: r.value, p_nom: n.value }); S.dashToday = null; toast(m.branch + " saved"); hooks.render(); }
-        catch (e) { msg("Save failed", errText(e)); }
-      } }))));
-  });
-  c.append(dlR, dlN, el("div", { class: "tw" }, t));
-  return c;
-}
-
 function holidayCard(A) {
-  var c = el("div", { class: "card" }, el("h3", { text: "Holidays (KPI001)" }),
+  var c = el("div", { class: "card", id: "holidays" }, el("h3", { text: "Holidays (KPI001)" }),
     el("p", { class: "small muted", style: "margin:0 0 8px", text: "A holiday is not a working day: no daily list and it does not count in HKE. Leave the warehouses empty for a national holiday, or pick the warehouses for a state holiday." }));
   if (!S.holidays) {
     c.append(el("p", { class: "muted small", text: "Loading…" }));
@@ -332,6 +305,66 @@ function holidayCard(A) {
   return c;
 }
 
+/* every warehouse in one place: working days, count window, supervisor PIN, region and NOM. Rows wrap, Edit opens a form. */
+function warehousesCard(A) {
+  var c = el("div", { class: "card", id: "warehouses" }, el("h3", { text: "Warehouses" }),
+    el("p", { class: "small muted", text: "Working days and count window drive the daily list and KPI001 (submitting after the window end counts as late). Region and NOM filter the dashboard." }));
+  if (!S.meta && !S.metaLoading) { S.metaLoading = true; rpc("admin_branch_meta", { p_token: tok() }).then(function (r) { S.meta = r; S.metaLoading = false; hooks.render(); }, function (e) { S.metaLoading = false; S.meta = []; msg("Can't load regions", errText(e)); }); }
+  var meta = {}; (S.meta || []).forEach(function (m) { meta[m.branch] = m; });
+  var box = el("div", { class: "whcards" });
+  (A.branches || []).filter(function (b) { return b.active; }).forEach(function (b) {
+    var m = meta[b.name] || {}, days = {}; (b.workDays || []).forEach(function (d) { days[d] = 1; });
+    box.append(el("div", { class: "whc" },
+      el("div", { class: "whn" }, el("b", { text: b.name }), el("span", { class: "small muted", text: (b.plants || []).length ? "Plant " + b.plants.join(", ") : "No plant code" })),
+      el("div", { class: "days", "aria-label": "Working days" }, WD.map(function (w) { return el("span", { class: days[w[0]] ? "on" : "", title: w[1] + (days[w[0]] ? " · working" : " · off"), text: w[1].slice(0, 2) }); })),
+      el("span", { class: "small num", text: (b.from || "07:00") + "–" + (b.to || "10:00") }),
+      el("span", { class: "small wx" }, el("span", { class: "pill " + (b.supPin ? (b.supMustChange ? "warn" : "ok") : ""), text: b.supPin ? (b.supMustChange ? "PIN not changed yet" : "PIN set") : "No PIN" }),
+        el("div", { class: "small muted", style: "margin-top:3px", text: S.meta ? ([m.region, m.nom].filter(Boolean).join(" · ") || "No region") : "…" })),
+      el("button", { class: "btn", style: "min-height:38px;padding:7px 14px", text: "Edit", "aria-label": "Edit " + b.name, onclick: function () { editWarehouse(b, m); } })));
+  });
+  c.append(box);
+  return c;
+}
+function editWarehouse(b, m) {
+  var days = {}; (b.workDays || []).forEach(function (d) { days[d] = 1; });
+  var uniq = function (k) { var o = {}; (S.meta || []).forEach(function (x) { if (x[k]) o[x[k]] = 1; }); return Object.keys(o).sort(); };
+  openModal(function (sh) {
+    var chips = el("div", { class: "row", style: "gap:4px" }, WD.map(function (w) {
+      var x = el("button", { class: "wd" + (days[w[0]] ? " on" : ""), style: "padding:8px 10px;font-size:13px", text: w[1], "aria-pressed": days[w[0]] ? "true" : "false", onclick: function () { if (days[w[0]]) delete days[w[0]]; else days[w[0]] = 1; x.classList.toggle("on"); x.setAttribute("aria-pressed", days[w[0]] ? "true" : "false"); } }); return x;
+    }));
+    var f = el("input", { type: "time", value: b.from || "07:00" }), to = el("input", { type: "time", value: b.to || "10:00" });
+    var r = el("input", { value: m.region || "", placeholder: "e.g. Central", list: "dl-region" }), n = el("input", { value: m.nom || "", placeholder: "Name", list: "dl-nom" });
+    var err = el("div", { class: "small badt", style: "min-height:16px" });
+    var lab = function (t) { return el("div", { class: "small", style: "font-weight:700;margin:12px 0 5px", text: t }); };
+    sh.append(el("h3", { text: b.name }), el("p", { class: "small muted", style: "margin:0", text: (b.plants || []).length ? "Plant " + b.plants.join(", ") : "" }),
+      lab("Working days"), chips,
+      lab("Count window"), el("div", { class: "row", style: "flex-wrap:nowrap" }, f, el("span", { text: "–" }), to),
+      lab("Region"), r, el("datalist", { id: "dl-region" }, uniq("region").map(function (v) { return el("option", { value: v }); })),
+      lab("National operation manager"), n, el("datalist", { id: "dl-nom" }, uniq("nom").map(function (v) { return el("option", { value: v }); })),
+      lab("Supervisor PIN"), el("div", { class: "row" }, el("span", { class: "pill " + (b.supPin ? (b.supMustChange ? "warn" : "ok") : ""), text: b.supPin ? (b.supMustChange ? "Not changed yet" : "Set") : "No PIN" }),
+        el("button", { class: "link strong", text: b.supPin ? "Reset PIN" : "Create PIN", onclick: function () { closeModal(); supPin(b); } })),
+      err,
+      el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }),
+        el("button", { class: "btn primary", style: "flex:2", text: "Save", onclick: async function (e) {
+          var btn = e.currentTarget; if (!Object.keys(days).length) { err.textContent = "Pick at least one working day"; return; }
+          if (!f.value || !to.value || f.value >= to.value) { err.textContent = "The window must end after it starts"; return; }
+          btn.disabled = true;
+          try {
+            await rpc("admin_dcc_branch", { p_token: tok(), p_branch: b.name, p_days: Object.keys(days).map(Number).sort(), p_from: f.value, p_to: to.value });
+            if ((r.value || "") !== (m.region || "") || (n.value || "") !== (m.nom || "")) S.meta = await rpc("admin_branch_meta", { p_token: tok(), p_branch: b.name, p_region: r.value, p_nom: n.value });
+            S.dashToday = null; S.todayT = null; closeModal(); await loadAdmin(); hooks.render(); toast(b.name + " saved");
+          } catch (x) { err.textContent = errText(x); btn.disabled = false; }
+        } })));
+  });
+}
+function supPin(b) {
+  confirmBox((b.supPin ? "Reset" : "Create") + " supervisor PIN for " + b.name + "?", "A new 6-digit PIN is shown once. Give it to the warehouse supervisor; they choose their own PIN at first login." + (b.supPin ? " The old PIN stops working and the supervisor is logged out." : ""), b.supPin ? "Reset" : "Create", async function () {
+    try { var r = await rpc("admin_sup_pin", { p_token: tok(), p_branch: b.name }); await loadAdmin(); hooks.render();
+      msg("Supervisor PIN for " + b.name, "PIN: " + r.pin + "\n\nLog in: open the app → “Warehouse supervisor? Log in here” → plant code + this PIN. It won't be shown again."); }
+    catch (e) { msg("Failed", errText(e)); }
+  });
+}
+
 function dccCard(A, st) {
   var abc = st.dcc_abc || { a: 80, b: 95 }, tg = st.dcc_target || { A: 4, B: 2, C: 1 };
   var on = el("input", { type: "checkbox", checked: st.dcc_enabled !== false });
@@ -349,28 +382,5 @@ function dccCard(A, st) {
     el("div", { class: "row", style: "justify-content:flex-end;margin-top:8px" }, el("button", { class: "btn primary", text: "Save rules", onclick: function () {
       call("admin_settings", { p_patch: { dcc_enabled: on.checked, dcc_abc: { a: Number(ia.value), b: Number(ib.value) }, dcc_target: { A: Number(tA.value), B: Number(tB.value), C: Number(tC.value) }, dcc_min_skus: Number(mn.value) } }, "Daily count rules saved. New ABC limits apply from next month's classification.").catch(function () { });
     } })));
-  var t = el("table", {}, el("tr", {}, ["Warehouse", "Working days", "Count window", "Supervisor PIN", ""].map(function (h) { return el("th", { text: h }); })));
-  (A.branches || []).filter(function (b) { return b.active; }).forEach(function (b) {
-    var days = {}; (b.workDays || []).forEach(function (d) { days[d] = 1; });
-    var chips = el("div", { class: "row", style: "gap:3px;flex-wrap:nowrap" }, WD.map(function (w) {
-      var x = el("button", { class: "wd" + (days[w[0]] ? " on" : ""), text: w[1].slice(0, 2), title: w[1], onclick: function () { if (days[w[0]]) delete days[w[0]]; else days[w[0]] = 1; x.classList.toggle("on"); } }); return x;
-    }));
-    var f = el("input", { type: "time", value: b.from || "07:00", style: "width:138px" }), to = el("input", { type: "time", value: b.to || "10:00", style: "width:138px" });
-    t.append(el("tr", {}, el("td", { text: b.name }), el("td", {}, chips), el("td", {}, el("div", { class: "row", style: "gap:4px;flex-wrap:nowrap" }, f, el("span", { text: "-" }), to)),
-      el("td", {}, el("span", { class: "pill " + (b.supPin ? (b.supMustChange ? "warn" : "ok") : ""), text: b.supPin ? (b.supMustChange ? "Not changed yet" : "Set") : "No PIN" }),
-        el("button", { class: "link", style: "margin-left:6px", text: b.supPin ? "Reset" : "Create", onclick: function () {
-          confirmBox((b.supPin ? "Reset" : "Create") + " supervisor PIN for " + b.name + "?", "A new 6-digit PIN is shown once. Give it to the warehouse supervisor; they choose their own PIN at first login." + (b.supPin ? " The old PIN stops working and the supervisor is logged out." : ""), b.supPin ? "Reset" : "Create", async function () {
-            try { var r = await rpc("admin_sup_pin", { p_token: tok(), p_branch: b.name }); await loadAdmin(); hooks.render();
-              msg("Supervisor PIN for " + b.name, "PIN: " + r.pin + "\n\nLog in: open the app → “Warehouse supervisor? Log in here” → plant code + this PIN. It won't be shown again."); }
-            catch (e) { msg("Failed", errText(e)); }
-          });
-        } })),
-      el("td", {}, el("button", { class: "btn", text: "Save", onclick: function () {
-        call("admin_dcc_branch", { p_branch: b.name, p_days: Object.keys(days).map(Number).sort(), p_from: f.value, p_to: to.value }, b.name + " saved.").catch(function () { });
-      } }))));
-  });
-  c.append(el("h3", { style: "margin-top:16px", text: "Warehouses" }),
-    el("p", { class: "small muted", text: "Working days: no daily count on other days (Kelantan and Terengganu usually Sun-Thu). Submitting after the window end shows as late on the dashboard." }),
-    el("div", { class: "tw" }, t));
   return c;
 }

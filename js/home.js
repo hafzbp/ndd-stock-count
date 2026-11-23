@@ -46,19 +46,19 @@ function progressRows() {
   }).filter(function (r) { return r.exp > 0 || r.all.st !== "Not started"; });
 }
 function progressTable() {
-  if (single()) {
-    var rs = progressRows(), ts = el("table", {}, el("tr", {}, ["Warehouse", "Status", "SKUs counted", "Photos"].map(function (h, i) { return el("th", { class: i === 2 ? "n" : "", text: h }); })));
-    rs.forEach(function (r) { ts.append(el("tr", {}, el("td", { text: r.b }), el("td", {}, el("span", { class: "pill " + (r.all.st === "Submitted" ? "ok" : r.all.st === "Counting" ? "warn" : ""), text: r.all.st })), el("td", { class: "n", text: r.all.n + " / " + r.exp }), el("td", { text: String(r.all.photos) }))); });
-    if (!rs.length) ts.append(el("tr", {}, el("td", { colspan: 4, class: "muted", text: "No warehouse has SKUs to count yet." })));
-    return el("div", { class: "tw" }, ts);
-  }
-  var rows = progressRows(), t = el("table", {}, el("tr", {}, ["Warehouse", "Ops", "Ops SKUs", "Finance", "Finance SKUs", "Photos"].map(function (h, i) { return el("th", { class: i === 2 || i === 4 ? "n" : "", text: h }); })));
+  var sg = single(), rows = progressRows(), box = el("div", { class: "mcards" });
+  var pc = function (s) { return s === "Submitted" ? "ok" : s === "Counting" ? "warn" : ""; };
+  var line = function (label, x, exp) {
+    var p = exp ? Math.round(x.n / exp * 100) : 0;
+    return el("div", {}, el("div", { class: "row", style: "justify-content:space-between" }, el("span", { class: "small muted", text: label }), el("span", { class: "pill " + pc(x.st), text: x.st })),
+      el("div", { class: "prog", style: "height:6px;margin-top:5px" }, el("i", { style: "width:" + p + "%" })),
+      el("div", { class: "small num", style: "margin-top:3px", text: x.n + " / " + exp + " SKUs · " + x.photos + " photo" + (x.photos === 1 ? "" : "s") }));
+  };
   rows.forEach(function (r) {
-    var pill = function (s) { return el("span", { class: "pill " + (s === "Submitted" ? "ok" : s === "Counting" ? "warn" : ""), text: s }); };
-    t.append(el("tr", {}, el("td", { text: r.b }), el("td", {}, pill(r.ops.st)), el("td", { class: "n", text: r.ops.n + " / " + r.exp }), el("td", {}, pill(r.fin.st)), el("td", { class: "n", text: r.fin.n + " / " + r.exp }), el("td", { text: r.ops.photos + " / " + r.fin.photos })));
+    box.append(el("div", { class: "mcard" }, el("b", { text: r.b }), sg ? line("Count", r.all, r.exp) : [line("Ops count", r.ops, r.exp), line("Finance check", r.fin, r.exp)]));
   });
-  if (!rows.length) t.append(el("tr", {}, el("td", { colspan: 6, class: "muted", text: "No warehouse has SKUs to count yet." })));
-  return el("div", { class: "tw" }, t);
+  if (!rows.length) box.append(el("p", { class: "muted", text: "No warehouse has SKUs to count yet." }));
+  return box;
 }
 
 export function renderHome(app) {

@@ -13,6 +13,9 @@ def check(name, cond, extra=""):
     else: bad += 1; print("  ✗", name, str(extra)[:1500])
 def B(t): return f'button:has-text("{t}")'
 def SB(t): return f'#sheet button:has-text("{t}")'
+def ROW(nm): return f".wrow:has(.whn b:text-is('{nm}'))"
+def WH(nm): return f".whc:has(.whn b:text-is('{nm}'))"
+def dsel(pg, nm): pg.click(ROW(nm)); pg.wait_for_selector(f".detail h3:text-is('{nm}')"); pg.wait_for_selector(".detail .dacts")
 def pad(pg, digits, scope=""):
     for d in digits: pg.click(f"{scope}.pad button:text-is('{d}')")
     pg.click(f"{scope}button:text-is('Next')")
@@ -42,16 +45,16 @@ with sync_playwright() as p:
     ow.wait_for_selector("text=Daily counts ·"); ow.wait_for_timeout(500)
     tt = ow.inner_text(".card:has(h3:has-text('Daily counts'))")
     check("each warehouse has today's list (Not started, 0 / n)", "Not started: 3" in tt and len(re.findall(r"\b0 / [1-9]", tt)) == 3, tt)
-    ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('ABC')"); ow.wait_for_selector("#sheet >> text=ABC")
+    dsel(ow, "NDD Alpha"); ow.click(".detail button:text-is('ABC')"); ow.wait_for_selector("#sheet >> text=ABC")
     at = ow.inner_text("#sheet"); check("ABC: A1 is A (most value), B2/C3 lower", "A1 Wafer A 50g" in at and "62.9%" in at or "A1" in at, at); ow.click(SB("Close"))
-    ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('List')"); lt = ow.inner_text("#sheet"); check("today's list for Alpha is A1 (class A)", "A1" in lt, lt); ow.click(SB("Close"))
+    ow.click(".detail button:text-is('List')"); lt = ow.inner_text("#sheet"); check("today's list for Alpha is A1 (class A)", "A1" in lt, lt); ow.click(SB("Close"))
 
     print("HQ: settings")
     ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Daily cycle count")
     ow.locator(".card:has(h3:text-is('Warehouse photos at submit')) input[type=number]").first.fill("0"); ow.click(".card:has(h3:text-is('Warehouse photos at submit')) button:has-text('Save')"); ow.click(SB("OK"))
-    ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('Create')"); ow.click(SB("Create")); ow.wait_for_selector("#sheet >> text=PIN:")
+    ow.click(WH("NDD Alpha") + " button:text-is('Edit')"); ow.click(SB("Create PIN")); ow.click(SB("Create")); ow.wait_for_selector("#sheet >> text=PIN:")
     pin = ow.inner_text("#sheet").split("PIN: ")[1][:6]; check("supervisor PIN shown once (6 digits)", pin.isdigit() and len(pin) == 6, pin); ow.click(SB("OK"))
-    check("PIN status: not changed yet", "Not changed yet" in ow.inner_text("tr:has(td:text-is('NDD Alpha'))"))
+    ow.wait_for_timeout(400); check("PIN status: not changed yet", "not changed yet" in ow.inner_text(WH("NDD Alpha")), ow.inner_text(WH("NDD Alpha")))
 
     print("counter: today's list")
     op = page(390, 844); op.goto(BASE + "/?api=local"); op.wait_for_selector("text=Start counting"); pad(op, "1501")
@@ -69,10 +72,21 @@ with sync_playwright() as p:
 
     print("HQ sees progress; Master read-only view")
     ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily counts ·"); ow.wait_for_timeout(500)
-    ar = ow.inner_text("tr:has(td:text-is('NDD Alpha'))"); check("Alpha: Counting, 1 counted", "Counting" in ar and re.search(r"\b1 / [1-9]", ar), ar)
-    ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('View')"); ow.wait_for_selector("text=Daily count (read-only)")
+    ar = ow.inner_text(ROW("NDD Alpha")); check("Alpha: Counting, 1 counted", "Counting" in ar and re.search(r"\b1 / [1-9]", ar), ar)
+    dsel(ow, "NDD Alpha"); ow.click(".detail button:text-is('View counts')"); ow.wait_for_selector("text=Daily count (read-only)")
     check("View opens the day in Master", "COUNTED" in ow.inner_text("main") or "A1" in ow.inner_text("main"), ow.inner_text("main")[:400])
     ow.click(B("Back to Daily")); ow.wait_for_selector("text=Daily counts ·")
+
+    print("HQ: Today page")
+    ow.click("#tabs button:text-is('Today')"); ow.wait_for_selector(".whlist .whrow"); ow.wait_for_timeout(600)
+    tm = ow.inner_text("main")
+    check("Today: checklist (MB52, lists, holidays)", all(x in tm for x in ["Today's MB52", "Daily lists", "Holidays"]), tm[:600])
+    check("Today: MB52 loaded today", "Loaded · stock date today" in ow.inner_text(".ck:has-text(\"Today's MB52\")"), ow.inner_text(".checks"))
+    check("Today: stat strip (3 due, 1 counting)", re.search(r"3\s*Due today", ow.inner_text(".statrow")) and re.search(r"1\s*Counting", ow.inner_text(".statrow")), ow.inner_text(".statrow"))
+    wa = ow.inner_text(".whrow:has-text('NDD Alpha')"); check("Today: Alpha counting 1 / n SKUs", "ounting" in wa and re.search(r"\b1 / [1-9]", wa), wa)
+    check("Today: KPI card", "KPI001 daily count" in ow.inner_text(".side"), ow.inner_text(".side"))
+    ow.screenshot(path=f"{OUT}/admin_today.png", full_page=True)
+    ow.click(".whrow:has-text('NDD Beta') button:text-is('Open')"); ow.wait_for_selector(".detail h3:text-is('NDD Beta')"); check("Today → Open selects the warehouse in Daily", True)
 
     print("supervisor")
     sp = page(390, 844); sp.goto(BASE + "/?api=local"); sp.click(B("Warehouse supervisor? Log in here"))
@@ -92,12 +106,11 @@ with sync_playwright() as p:
     check("counter now sees the added SKU on the list", addc in op.inner_text(".skulist2"), op.inner_text("main")[:300])
 
     print("dashboards")
-    ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Region and national operation manager"); ow.wait_for_selector(".card:has(h3:text-is('Region and national operation manager')) table")
-    mc = ".card:has(h3:text-is('Region and national operation manager'))"
+    ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector(WH("NDD Beta") + " >> text=No region")
     for nm, rg, nom in [("NDD Alpha", "Central", "Ahmad"), ("NDD Beta", "North", "Budi")]:
-        ow.fill(f"{mc} tr:has(td:text-is('{nm}')) input >> nth=0", rg); ow.fill(f"{mc} tr:has(td:text-is('{nm}')) input >> nth=1", nom)
-        ow.click(f"{mc} tr:has(td:text-is('{nm}')) button:text-is('Save')"); ow.wait_for_timeout(600)
-    check("region + NOM saved", ow.input_value(f"{mc} tr:has(td:text-is('NDD Beta')) input >> nth=0") == "North")
+        ow.click(WH(nm) + " button:text-is('Edit')"); ow.fill("#sheet input[placeholder='e.g. Central']", rg); ow.fill("#sheet input[placeholder='Name']", nom)
+        ow.click(SB("Save")); ow.wait_for_selector("#modal:not(.on)", state="attached"); ow.wait_for_timeout(700)
+    check("region + NOM saved", "North · Budi" in ow.inner_text(WH("NDD Beta")), ow.inner_text(WH("NDD Beta")))
     ow.click("#tabs button:text-is('Dashboard')"); ow.wait_for_selector("text=Compliance · warehouse × day")
     dt = ow.inner_text("main"); check("admin dashboard: all sections", all(x in dt for x in ["Due today", "Not started", "SKU accuracy", "Net variance", "Needs attention", "Today per warehouse", "SKU accuracy by warehouse", "KPI001", "KPI002", "Daily cycle count", "Stock take (end of month)", "Result by SKU", "Counters", "ABC coverage", "Repeat variance SKUs", "Compliance", "By warehouse", "Top variance SKUs", "Bad stock (later phase)"]), dt[:800])
     tw = ow.inner_text(".card:has(h3:text-is('Today per warehouse'))"); check("today table: Alpha counting 1 / 2, Beta not started", "Counting" in tw and re.search(r"\b1 / [2-9]", tw) and "Not started" in tw, tw)
@@ -128,7 +141,7 @@ with sync_playwright() as p:
     op.click(".big:has-text('NDD Alpha')"); op.wait_for_selector("#sheet .pad"); [op.click(f"#sheet .pad button:text-is('{d}')") for d in "1501"]; op.click("#sheet button:text-is('Next')")
     op.wait_for_selector(".kind-daily"); op.wait_for_timeout(3500)
     check("logged in again: the change uploads", "All saved" in op.inner_text("#pill"), op.inner_text("#pill"))
-    ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily counts ·"); ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('View')"); ow.wait_for_selector("text=Daily count (read-only)")
+    ow.click("#tabs button:text-is('Daily')"); ow.wait_for_selector("text=Daily counts ·"); dsel(ow, "NDD Alpha"); ow.click(".detail button:text-is('View counts')"); ow.wait_for_selector("text=Daily count (read-only)")
     check("HQ sees 356 (the offline change), not 355", "356" in ow.inner_text("main") and "355" not in ow.inner_text("main"), ow.inner_text("main")[:500])
 
     print("counter submits; HQ exports the daily report and the daily sign-off PDF")
@@ -136,8 +149,9 @@ with sync_playwright() as p:
     (op.click("#skuv [aria-label='Back to list']") if op.is_visible("#skuv") else None); op.click("#footIn >> text=Submit"); op.wait_for_selector("#sheet >> text=Review & submit"); op.check("#sheet input[type=checkbox]")
     cv = op.locator("#sheet canvas").first; cv.evaluate("e => e.scrollIntoView({block: 'center'})"); op.wait_for_timeout(150); bb = cv.bounding_box(); op.mouse.move(bb["x"] + 20, bb["y"] + 20); op.mouse.down(); op.mouse.move(bb["x"] + 150, bb["y"] + 50, steps=8); op.mouse.up()
     op.click("#sheet >> text=Submit count"); op.wait_for_selector("text=Submitted ✓", timeout=10000); op.wait_for_timeout(1500)
-    ow.click(B("Back to Daily")); ow.wait_for_selector("text=Daily counts ·"); ow.click(B("↻")); ow.wait_for_selector("tr:has(td:text-is('NDD Alpha')) button:text-is('PDF')")
-    with ow.expect_download() as dl: ow.click("tr:has(td:text-is('NDD Alpha')) button:text-is('PDF')")
+    ow.click(B("Back to Daily")); ow.wait_for_selector("text=Daily counts ·"); ow.click(B("↻")); dsel(ow, "NDD Alpha"); ow.wait_for_selector(".detail >> text=Counted by")
+    check("detail panel: submitted, counted by Siti", "Siti" in ow.inner_text(".detail") and "OK / within" in ow.inner_text(".detail"), ow.inner_text(".detail"))
+    with ow.expect_download() as dl: ow.click(".detail button:text-is('Sign-off PDF')")
     ow.wait_for_selector("#sheet >> text=Saved ✓", timeout=20000); dl.value.save_as(f"{OUT}/dcc_signoff.pdf")
     pdf = base64.b64decode(ow.evaluate("window.__pdf").split(",", 1)[1])
     check("daily PDF: name, header, status, summary, counter signature, supervisor box", all(x in pdf for x in [b"DCC_SignOff_NDD_Alpha", b"Daily cycle count sign-off", b"NDD Alpha - Daily Cycle Count", b"Submitted", b"SKUs on today's list", b"Counted by", b"Checked by - Warehouse supervisor", b"Exceptions"]) if False else all(x in pdf for x in [b"Daily cycle count sign-off", b"NDD Alpha - Daily Cycle Count", b"Submitted", b"SKUs on today's list", b"Counted by", b"Checked by - Warehouse supervisor", b"Exceptions"]), pdf[:200])

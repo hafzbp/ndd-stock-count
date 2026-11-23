@@ -5,7 +5,7 @@ import { el, fmt, tsTxt, msg, errText, openModal, closeModal } from "./ui.js";
 import { loadAdmin } from "./master.js";
 import { mb52Card } from "./setup.js";
 import { dayStatus, clsTag, renderDccStats } from "./dcc.js";
-import { exportDailyReport, dailyPdf } from "./export.js";
+import { exportDailyReport, dailyPdf, dailySkus, dailyTotals } from "./export.js";
 
 function tok() { return S.admin.token; }
 function iso(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
@@ -15,6 +15,7 @@ function hhmm(ts) { return ts ? new Date(ts).toLocaleTimeString("en-GB", { hour:
 
 export async function loadDaily() {
   S.dcc = await rpc("admin_dcc_day", { p_token: tok(), p_date: S.dccDate || null });
+  S.dailyDet = null;
   if (!S.dccDate) S.dccDate = S.dcc.date;
   return S.dcc;
 }
@@ -42,21 +43,58 @@ export function renderDaily(app) {
     el("button", { class: "btn", text: "›", title: "Next day", disabled: d >= today, onclick: function () { S.dccDate = addDays(d, 1); S.dcc = null; hooks.render(); } }),
     d !== today ? el("button", { class: "btn", text: "Today", onclick: function () { S.dccDate = today; S.dcc = null; hooks.render(); } }) : null,
     el("button", { class: "btn", text: "↻", title: "Refresh", onclick: function () { S.dcc = null; hooks.render(); } }));
-  var t = el("table", {}, el("tr", {}, ["Warehouse", "Status", "SKUs counted", "Count window", "Submitted", ""].map(function (h, i) { return el("th", { class: i === 2 ? "n" : "", text: h }); })));
+  var sel = rows.filter(function (r) { return r.branch === S.dailySel; })[0] || rows.filter(function (r) { return r.take; })[0] || rows[0];
+  var list = el("div", { class: "wrows" });
   rows.forEach(function (r, i) {
     var s = st[i], tk = r.take;
-    t.append(el("tr", {}, el("td", { text: r.branch }), el("td", {}, el("span", { class: "pill " + s.c, text: s.t })),
-      el("td", { class: "n", text: tk ? r.counted + " / " + tk.skuCount : "" }), el("td", { class: "muted", text: r.from + "-" + r.to }), el("td", { text: hhmm(r.submittedAt) }),
-      el("td", { class: "row", style: "gap:6px;flex-wrap:nowrap" },
-        tk ? el("button", { class: "link", text: "View", onclick: function () { S.viewTake = tk.id; S.mBranch = r.branch; S.tab = "master"; loadAdmin().then(hooks.render); window.scrollTo(0, 0); } }) : null,
-        tk ? el("button", { class: "link", text: "List", onclick: function () { showList(r); } }) : null,
-        tk ? el("button", { class: "link", text: "PDF", title: "Daily sign-off PDF", onclick: function () { dailyPdf(r.branch, d); } }) : null,
-        el("button", { class: "link", text: "ABC", onclick: function () { showAbc(r.branch, tok()); } }))));
+    list.append(el("button", { class: "wrow" + (sel === r ? " on" : ""), "aria-pressed": sel === r ? "true" : "false", onclick: function () { S.dailySel = r.branch; hooks.render(); if (window.innerWidth < 860) setTimeout(function () { var x = document.querySelector(".detail"); if (x) x.scrollIntoView({ block: "start", behavior: "smooth" }); }, 50); } },
+      el("span", { class: "whn" }, el("b", { text: r.branch }), el("span", { class: "small muted", text: (r.from || "") + "–" + (r.to || "") })),
+      el("span", { class: "pill " + s.c, text: s.t }),
+      el("span", { class: "small num wx", text: tk ? r.counted + " / " + tk.skuCount + " SKUs" : "" }),
+      el("span", { class: "small muted num wx", text: r.submittedAt ? "Sent " + hhmm(r.submittedAt) : "" }),
+      el("span", { class: "muted", "aria-hidden": "true", text: "›" })));
   });
-  if (!rows.length) t.append(el("tr", {}, el("td", { colspan: 6, class: "muted", text: "No warehouses yet." })));
-  app.append(el("div", { class: "card" }, el("div", { class: "row", style: "justify-content:space-between" }, el("h3", { style: "margin:0", text: "Daily counts · " + niceDate(d) }),
+  if (!rows.length) list.append(el("p", { class: "muted", text: "No warehouses yet." }));
+  var left = el("div", { class: "card" }, el("div", { class: "row", style: "justify-content:space-between" }, el("h3", { style: "margin:0", text: "Daily counts · " + niceDate(d) }),
       el("div", { class: "row", style: "gap:6px" }, nav, el("button", { class: "btn", text: "⬇ Export report", onclick: function () { reportDialog(today, rows.map(function (r) { return r.branch; })); } }))),
-    el("p", { class: "small muted", text: Object.keys(cnt).map(function (k) { return k + ": " + cnt[k]; }).join(" · ") }), el("div", { class: "tw" }, t)));
+    el("p", { class: "small muted", text: Object.keys(cnt).map(function (k) { return k + ": " + cnt[k]; }).join(" · ") }), list);
+  app.append(el("div", { class: "split" }, left, sel ? detailPanel(sel, st[rows.indexOf(sel)], d) : el("div")));
+}
+
+/* right-hand panel: one warehouse on one day */
+function detailPanel(r, s, d) {
+  var tk = r.take, key = d + "|" + r.branch, c = el("div", { class: "card detail" });
+  c.append(el("div", { class: "small muted", text: niceDate(d) }), el("h3", { style: "margin:2px 0 6px;font-size:18px", text: r.branch }), el("span", { class: "pill " + s.c, text: s.t }));
+  if (!tk) { c.append(el("p", { class: "muted small", text: s.t === "Off day" ? "Not a working day for this warehouse." : "No daily list for this day." }),
+    el("div", { class: "dacts" }, el("button", { class: "btn", text: "ABC plan", onclick: function () { showAbc(r.branch, tok()); } }))); return c; }
+  var D = S.dailyDet && S.dailyDet.key === key ? S.dailyDet : null;
+  if (!D) {
+    c.append(el("p", { class: "muted small", text: "Loading…" }));
+    if (S.dailyDetLoading !== key) { S.dailyDetLoading = key;
+      rpc("admin_dcc_report", { p_token: tok(), p_from: d, p_to: d, p_branch: r.branch }).then(function (rr) { S.dailyDet = { key: key, t: (rr.takes || [])[0] || null }; S.dailyDetLoading = null; hooks.render(); },
+        function (e) { S.dailyDetLoading = null; S.dailyDet = { key: key, err: errText(e) }; hooks.render(); }); }
+  } else if (D.err) c.append(el("p", { class: "small badt", text: "Can't load: " + D.err }));
+  else if (D.t) {
+    var t = D.t, o = dailyTotals(t), sk = dailySkus(t);
+    c.append(el("div", { class: "small muted", style: "margin-top:8px", text: [t.who ? "Counted by " + t.who : "", t.submittedAt ? "sent " + hhmm(t.submittedAt) : "", t.photos ? t.photos + " photo" + (t.photos > 1 ? "s" : "") : ""].filter(Boolean).join(" · ") || "Nobody has counted yet" }),
+      el("div", { class: "dstats" }, el("div", {}, el("b", { class: "num okt", text: String(o.ok + o.within) }), el("span", { text: "OK / within" })),
+        el("div", {}, el("b", { class: "num " + (o.over + o.nis ? "badt" : ""), text: String(o.over + o.nis) }), el("span", { text: "Out of tolerance" })),
+        el("div", {}, el("b", { class: "num", text: String(o.notCounted) }), el("span", { text: "Not counted" }))),
+      el("div", { class: "row", style: "justify-content:space-between" }, el("span", { class: "small muted", text: "Net variance" }), el("b", { class: "num " + (o.net < 0 ? "badt" : ""), text: (o.net < 0 ? "-RM " : "RM ") + fmt(Math.abs(o.net), 0) })));
+    var iss = sk.filter(function (g) { return g.flag === "OVER" || g.flag === "NOT IN SYSTEM"; }).sort(function (a, b) { return Math.abs(b.vv || 0) - Math.abs(a.vv || 0); });
+    if (iss.length) {
+      var box = el("div", { style: "margin-top:10px" }, el("div", { class: "small", style: "font-weight:700;margin-bottom:2px", text: "Out of tolerance · counted again tomorrow" }));
+      iss.slice(0, 6).forEach(function (g) { box.append(el("div", { class: "issue" }, el("span", {}, el("b", { text: g.code + " " }), el("span", { class: "muted", text: g.desc })), el("span", { class: "num badt", style: "white-space:nowrap", text: (g.v > 0 ? "+" : "") + fmt(g.v || 0) + " pcs" }))); });
+      if (iss.length > 6) box.append(el("div", { class: "small muted", text: "+ " + (iss.length - 6) + " more in the PDF" }));
+      c.append(box);
+    }
+  }
+  c.append(el("div", { class: "dacts" },
+    el("button", { class: "btn primary", text: "Sign-off PDF", onclick: function () { dailyPdf(r.branch, d); } }),
+    el("button", { class: "btn", text: "View counts", onclick: function () { S.viewTake = tk.id; S.mBranch = r.branch; S.tab = "master"; loadAdmin().then(hooks.render); window.scrollTo(0, 0); } }),
+    el("button", { class: "btn", text: "List", onclick: function () { showList(r); } }),
+    el("button", { class: "btn", text: "ABC", onclick: function () { showAbc(r.branch, tok()); } })));
+  return c;
 }
 
 /* period + warehouse for the daily Excel report */
