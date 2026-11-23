@@ -40,7 +40,7 @@ export function tsTxt(i) { return i ? new Date(i).toLocaleString("en-MY", { day:
 export function pill(t, c) { var p = $("#pill"); if (!p) return; p.textContent = t; p.className = "pill " + (c || ""); }
 
 var modalStack = 0;
-export function openModal(build) { var sh = $("#sheet"); sh.innerHTML = ""; build(sh); $("#modal").classList.add("on"); modalStack++; }
+export function openModal(build, cls) { var sh = $("#sheet"); sh.innerHTML = ""; sh.className = "sheet" + (cls ? " " + cls : ""); $("#modal").className = "modal" + (cls ? " " + cls : ""); build(sh); $("#modal").classList.add("on"); modalStack++; }
 export function closeModal() { $("#modal").classList.remove("on"); }
 export function msg(t, body) { openModal(function (sh) { sh.append(el("h3", { text: t }), body ? el("p", { class: "muted", style: "white-space:pre-line", text: body }) : null, el("button", { class: "btn block", text: "OK", onclick: closeModal })); }); }
 export function confirmBox(t, body, ok, fn) {

@@ -31,15 +31,21 @@ function roleOf(t) { return t.role || "Checker"; }
 /* ---------- plant code (branch login) ---------- */
 /* Pad for the SAP plant code. onOk(branch, take) after a successful login. wantBranch: only accept that branch. */
 export function plantPad(title, sub, wantBranch, onOk, inline) {
-  var v = "", d = el("div", { class: "disp", style: "letter-spacing:8px" }), err = el("div", { class: "small", style: "color:var(--bad);text-align:center;min-height:20px;margin-top:6px" });
-  function draw() { d.textContent = v || "-"; } draw();
-  var go = el("button", { class: "btn primary", style: "flex:2", text: "Next", onclick: async function () {
+  var v = "", d = el("div", { class: "codebox", "aria-live": "polite" }), err = el("div", { class: "small", style: "color:var(--bad);min-height:20px;margin-top:6px;font-weight:600" });
+  function draw() {
+    d.innerHTML = ""; var n = Math.max(4, v.length);
+    for (var i = 0; i < n; i++) d.append(el("span", { class: i === v.length ? "now" : v[i] ? "set" : "", text: v[i] || "" }));
+    d.setAttribute("aria-label", v ? "Plant code " + v.split("").join(" ") : "No plant code yet");
+  } draw();
+  var go = el("button", { class: "btn primary big1", style: "flex:2", text: "Next", onclick: function () { login(); } });
+  async function login(code) {
+    if (code) { v = code; draw(); }
     if (!v || go.disabled) return; go.disabled = true; go.textContent = "Checking…";
     try {
       var r = await rpc("plant_login", { p_code: v });
       if (!r.ok) { v = ""; draw(); err.textContent = "No warehouse with that plant code"; return; }
       if (wantBranch && r.branch !== wantBranch) { v = ""; draw(); err.textContent = "That code is for " + r.branch + ", not " + wantBranch; return; }
-      S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null;
+      S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null; store("ndd2-last", { code: v, branch: r.branch });
       if (r.take) S.take = Object.assign({}, S.take || {}, r.take);
       if (!inline) closeModal();
       await loadMaster().catch(function () { });
@@ -47,10 +53,11 @@ export function plantPad(title, sub, wantBranch, onOk, inline) {
       flush();
     } catch (e) { err.textContent = errText(e); }
     finally { go.disabled = false; go.textContent = "Next"; }
-  } });
+  }
   var pad = el("div", { class: "pad" }); "1 2 3 4 5 6 7 8 9 C 0 ⌫".split(" ").forEach(function (k) { pad.append(el("button", { text: k, "aria-label": k === "⌫" ? "delete" : k === "C" ? "clear" : k, onclick: function () { if (k === "C") v = ""; else if (k === "⌫") v = v.slice(0, -1); else if (v.length < 8) v += k; err.textContent = ""; draw(); } })); });
-  var box = el("div", {}, el(inline ? "h2" : "h3", { text: title }), el("p", { class: "muted small", text: sub }), d, err, pad,
+  var box = el("div", { class: "plantpad" }, el(inline ? "h2" : "h3", { text: title }), el("p", { class: "muted", style: "margin:0 0 14px", text: sub }), d, err, pad,
     el("div", { class: "row", style: "margin-top:12px" }, inline ? null : el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }), go));
+  box.login = login;
   if (inline) return box;
   openModal(function (sh) { sh.append(box); });
 }
@@ -107,53 +114,74 @@ export function renderCount(app) {
       el("p", { class: "muted", text: "Your counts for " + m.branch + " are saved. Nothing else to do here." }),
       el("button", { class: "btn primary", text: "Done - back to start", onclick: function () { if (hooks.counterLogout) hooks.counterLogout(true); } })));
   }
-  else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + ". Ask your admin to reopen if anything needs changing." }));
-  app.append(kindLabel(S.take && (S.take.kind === "daily" || S.take.scope === "partial") ? (bd.codes || []).length : null));
-  if (singleMode()) app.append(el("div", { class: "banner", style: "background:var(--okbg);color:var(--ok)" }, "COUNT - count every SKU and batch you find, then submit."));
-  else app.append(el("div", { class: "banner", style: "background:" + (sessRole(m) === "fin" ? "var(--badbg);color:var(--accent)" : "var(--okbg);color:var(--ok)") },
-    (sessRole(m) === "fin" ? "FINANCE CHECK" : "OPS COUNT") + " - count everything yourself. Do not share or compare numbers with the other team."));
+  else if (m.status === "submitted" && !isAdmin()) app.append(doneCard(m));
+  else if (m.status === "submitted") app.append(el("div", { class: "banner ok", text: "Submitted ✓ " + tsTxt(m.submittedAt) + "." }));
   var nRc = Object.keys(rcMap()).length;
-  if (nRc) app.append(el("div", { class: "banner bad" }, "⚠ Recount needed on " + nRc + " line(s). Tap the “Recount” filter, recount those batches and correct your numbers, then submit again."));
   var inSys = {}; (bd.codes || []).forEach(function (c) { inSys[c] = 1; });
-  var skus = (S.skus || []).slice().sort(function (a, b) { return ((inSys[a.code] ? 0 : 1) - (inSys[b.code] ? 0 : 1)) || a.code.localeCompare(b.code); });
+  var skus = (S.skus || []).slice().sort(function (a, b) { return ((rcSku(a.code) ? 0 : 1) - (rcSku(b.code) ? 0 : 1)) || ((inSys[a.code] ? 0 : 1) - (inSys[b.code] ? 0 : 1)) || a.code.localeCompare(b.code); });
   var known = {}; skus.forEach(function (x) { known[x.code] = 1; }); (m.extraSkus || []).forEach(function (x) { if (!known[x.code]) { skus.push({ code: x.code, desc: (x.desc || "") + " (not on list)", per: null, perBox: null }); known[x.code] = 1; } });
   var expected = skus.filter(function (s) { return inSys[s.code]; });
   S.skuIndex = {}; skus.forEach(function (s) { S.skuIndex[s.code] = s; });
-  var tb = el("div", { class: "toolbar" });
-  var search = el("input", { type: "search", inputmode: "search", enterkeyhint: "search", placeholder: "Search SKU code or name, or scan", value: S.q,
-    oninput: function (e) { S.q = e.target.value; clr.classList.toggle("hidden", !S.q); drawList(); window.scrollTo(0, 0); },
+
+  /* header card: what this is, progress, time left, filters */
+  var t = S.take || {}, tl = timeLeft(t), role = sessRole(m);
+  var tag = t.kind === "daily" ? el("span", { class: "kind-daily ktag", text: "DAILY CYCLE COUNT" }) : el("span", { class: (t.stockType === "bad" ? "kind-bad" : "kind-monthly") + " ktag", text: (t.stockType === "bad" ? "MONTHLY STOCK TAKE · BAD STOCK" : "MONTHLY STOCK TAKE") + (t.scope === "partial" ? " · only " + expected.length + " SKU" + (expected.length === 1 ? "" : "s") + " on your list" : "") });
+  var head = el("div", { class: "chead" });
+  head.append(el("div", { class: "row", style: "justify-content:space-between;flex-wrap:nowrap" },
+    el("div", { style: "min-width:0" }, tag, el("div", { class: "rt", text: m.branch }), el("div", { class: "small muted", style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis", text: (singleMode() ? "" : roleName(role) + " · ") + m.member }))));
+  if (!singleMode()) head.append(el("div", { class: "roleline " + (role === "fin" ? "fin" : "ops"), text: (role === "fin" ? "FINANCE CHECK" : "OPS COUNT") + " - count everything yourself. Do not share or compare numbers with the other team." }));
+  else if (t.kind !== "daily") head.append(el("div", { class: "roleline ops", text: "COUNT - count every SKU and batch you find, then submit." }));
+  S.progTxt = el("b", { class: "num" }); S.progBar = el("i"); S.expected = expected;
+  head.append(el("div", { class: "row", style: "justify-content:space-between;margin-top:10px;flex-wrap:nowrap;gap:10px" }, S.progTxt,
+    tl ? el("span", { class: "small num deadline" + (tl.late ? " late" : ""), text: tl.txt }) : null), el("div", { class: "prog" }, S.progBar));
+  var cnt = { todo: expected.filter(function (s) { return !skuDone(s); }).length, done: skus.filter(skuDone).length, all: skus.length, recount: skus.filter(function (s) { return rcSku(s.code); }).length };
+  var seg = el("div", { class: "seg", role: "tablist" });
+  (nRc ? [["recount", "⚠ Recount"], ["todo", "To count"], ["done", "Counted"], ["all", "All"]] : [["todo", "To count"], ["done", "Counted"], ["all", "All"]]).forEach(function (f) {
+    seg.append(el("button", { class: "chip" + (S.filter === f[0] ? " on" : ""), role: "tab", "aria-selected": String(S.filter === f[0]), "data-n": String(cnt[f[0]]), text: f[1], onclick: function () { S.filter = f[0]; hooks.render(); } }));
+  });
+  head.append(seg); app.append(head); refreshProgress();
+  if (nRc) app.append(el("div", { class: "banner bad" }, "⚠ Recount needed on " + nRc + " line(s). Tap the “Recount” filter, recount those batches and correct your numbers, then submit again."));
+
+  var search = el("input", { type: "search", inputmode: "search", enterkeyhint: "search", placeholder: "Search code or name, or scan", value: S.q, "aria-label": "Search SKU",
+    oninput: function (e) { S.q = e.target.value; clr.classList.toggle("hidden", !S.q); drawList(); },
     onkeydown: function (e) { if (e.key === "Enter") { var v = search.value.trim(); if (S.barcodes[v] && !locked) { e.preventDefault(); S.q = ""; search.value = ""; clr.classList.add("hidden"); drawList(); openScanSheet(v, true); } } } });
   var clr = el("button", { class: "clr" + (S.q ? "" : " hidden"), text: "✕", "aria-label": "clear search", onclick: function () { S.q = ""; search.value = ""; clr.classList.add("hidden"); drawList(); search.focus(); } });
   S.searchEl = search;
-  var seg = el("div", { class: "seg" });
-  (nRc ? [["recount", "⚠ Recount"], ["todo", "To count"], ["done", "Counted"], ["all", "All"]] : [["todo", "To count"], ["done", "Counted"], ["all", "All"]]).forEach(function (f) { seg.append(el("button", { class: "chip" + (S.filter === f[0] ? " on" : ""), text: f[1], onclick: function () { S.filter = f[0]; hooks.render(); } })); });
-  S.progTxt = el("div", { class: "small muted", style: "margin-top:6px" }); S.progBar = el("i"); S.expected = expected;
-  tb.append(el("div", { class: "sbox" }, el("span", { class: "ico", text: "🔍" }), search, clr), seg, S.progTxt, el("div", { class: "prog" }, S.progBar)); app.append(tb); refreshProgress();
-  if (!locked) app.append(el("button", { class: "sfab scan", "aria-label": "Scan barcode", onclick: function () { openScanner(); } }, el("span", { text: "▥" }), el("small", { text: "SCAN" })));
-  app.append(el("button", { class: "sfab", text: "🔍", "aria-label": "Search SKU", onclick: function () { window.scrollTo({ top: 0, behavior: "smooth" }); setTimeout(function () { S.searchEl && S.searchEl.focus(); }, 250); } }));
-  var list = el("div"); app.append(list);
+  var nextBox = el("div"), list = el("div", { class: "skulist2" });
+  app.append(nextBox, el("div", { class: "sbox" }, el("span", { class: "ico" }, svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>', 18)), search, clr), list);
   function drawList() {
-    list.innerHTML = ""; var q = S.q.trim().toLowerCase();
+    list.innerHTML = ""; nextBox.innerHTML = ""; var q = S.q.trim().toLowerCase();
     var words = q.split(/\s+/).filter(Boolean);
     var rows = skus.filter(function (s) {
       var toks = (s.code + " " + (s.desc || "")).toLowerCase().split(/[^a-z0-9.%]+/).filter(Boolean);
-      return words.every(function (w) { return toks.some(function (t) { return t.indexOf(w) === 0; }); });
+      return words.every(function (w) { return toks.some(function (t2) { return t2.indexOf(w) === 0; }); });
     });
     if (S.filter === "todo") rows = rows.filter(function (s) { return (inSys[s.code] || q) && !skuDone(s); });
     if (S.filter === "done") rows = rows.filter(skuDone);
     if (S.filter === "recount") rows = rows.filter(function (s) { return rcSku(s.code); });
+    S.navList = rows.map(function (s) { return s.code; });
+    if (S.filter === "todo" && !q && rows.length && !locked) {
+      var nx = rows[0];
+      nextBox.append(el("button", { class: "nextup", onclick: function () { openSku(nx); } },
+        el("span", { class: "nxt" }, el("small", { text: "NEXT UP" }), el("b", { text: nx.desc || nx.code }), el("span", { class: "small num", text: nx.code + (rcSku(nx.code) ? " · recount" : "") })),
+        el("span", { class: "nxb", text: "Count" })));
+    }
     if (!skus.length) list.append(el("p", { class: "center muted", text: "SKU list not loaded yet - check back after your admin uploads it." }));
-    else if (!rows.length) list.append(el("p", { class: "center muted", text: S.filter === "todo" && !q ? "All done 🎉 Use search or “All” for anything else on the floor." : "Nothing here." }));
+    else if (!rows.length) list.append(el("div", { class: "empty" }, el("b", { text: S.filter === "todo" && !q ? "All done 🎉" : "Nothing here." }),
+      S.filter === "todo" && !q && !locked ? el("span", { text: "Check your counts, then tap Review & submit." }) : null));
     rows.slice(0, 300).forEach(function (s) { list.append(skuCard(s, locked)); });
-    if (!locked) list.append(el("button", { class: "btn block", style: "margin-top:8px", text: "+ SKU not in the list", onclick: function () { addExtraSku(m); } }));
+    if (!locked) list.append(el("button", { class: "btn block", style: "margin-top:10px", text: "+ SKU not in the list", onclick: function () { addExtraSku(m); } }));
     if (rows.length > 300) list.append(el("p", { class: "center small muted", text: "Showing 300 of " + rows.length + ". Search to narrow." }));
   }
   drawList();
+  if (S.openSku && S.skuIndex[S.openSku]) openSku(S.skuIndex[S.openSku]);
+
+  /* bottom bar: menu, scan, review & submit */
   $("#foot").classList.remove("hidden"); var fi = $("#footIn"); fi.innerHTML = "";
   var photoRule = photoNeed(m);
-  fi.append(el("button", { class: "btn", text: "⚙", "aria-label": "Settings", onclick: function () {
+  fi.append(el("button", { class: "btn iconbtn2", "aria-label": "More: names, photos, switch warehouse", onclick: function () {
       openModal(function (sh) {
-        sh.append(el("h3", { text: "Settings" }),
+        sh.append(el("h3", { text: "More" }),
           el("button", { class: "btn block", style: "margin-bottom:8px", text: "Switch person / warehouse", onclick: function () { closeModal(); S.step = "who"; S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); } }),
           el("button", { class: "btn block", style: "margin-bottom:8px", text: "Change name(s)", disabled: locked, onclick: function () { closeModal(); editCounters(m, locked); } }),
           el("button", { class: "btn block", style: "margin-bottom:8px", text: "📷 Warehouse photos (" + (m.photos || 0) + ")", onclick: function () { closeModal(); photoModal(m, locked); } }),
@@ -163,10 +191,84 @@ export function renderCount(app) {
           } }),
           el("button", { class: "btn block", style: "margin-top:10px", text: "Close", onclick: closeModal }));
       });
-    } }),
-    el("div", { class: "sp small muted", style: "line-height:1.3" }, el("div", { style: "font-weight:700", text: roleName(sessRole(m)).toUpperCase() }), el("div", { text: m.member })),
-    photoRule.on ? el("button", { class: "btn", style: "padding:11px 12px", text: "📷 " + (m.photos || 0) + "/" + photoRule.min, "aria-label": "Warehouse photos", onclick: function () { photoModal(m, locked); } }) : null,
-    locked ? null : el("button", { class: "btn primary", text: "Submit", onclick: function () { submitFlow(m, expected); } }));
+    } }, svg(ICON.more, 22)));
+  if (locked) fi.append(el("div", { class: "sp small muted", text: m.status === "submitted" ? "Sent to HQ · read only" : "Read only" }));
+  else fi.append(el("button", { class: "btn primary scanbtn", "aria-label": "Scan barcode", onclick: function () { openScanner(); } }, svg(ICON.scan, 22), el("span", { text: "Scan" })),
+    el("button", { class: "btn revbtn", onclick: function () { submitFlow(m, expected); } }, el("span", { text: "Review & submit" }),
+      photoRule.on ? el("small", { class: "num", text: "📷 " + (m.photos || 0) + "/" + photoRule.min }) : null));
+}
+
+/* after submit: a clear receipt and one way out */
+function doneCard(m) {
+  var n = Object.keys(m.lines || {}).filter(function (k) { return hasQty(m.lines[k]); }), skuN = {}; n.forEach(function (k) { skuN[m.lines[k].code] = 1; });
+  var t = S.take || {}, late = t.kind === "daily" && t.countTo && m.submittedAt && new Date(m.submittedAt) > new Date(t.countDate + "T" + t.countTo + ":00");
+  return el("div", { class: "donecard" },
+    el("span", { class: "dico" }, svg(ICON.check, 40)),
+    el("h2", { text: "Count submitted" }),
+    el("span", { class: "pill " + (late ? "warn" : "ok"), text: "Submitted ✓ " + tsTxt(m.submittedAt) + (t.kind === "daily" ? (late ? " · late" : " · on time") : "") }),
+    el("div", { class: "receipt" },
+      el("div", {}, el("span", { text: "Warehouse" }), el("b", { text: m.branch })),
+      el("div", {}, el("span", { text: "Count" }), el("b", { text: kindShort() + (t.kind === "daily" ? " · " + dayTxt(t.countDate) : "") })),
+      el("div", {}, el("span", { text: "SKUs counted" }), el("b", { text: String(Object.keys(skuN).length) })),
+      el("div", {}, el("span", { text: "Counted by" }), el("b", { text: m.member || "" })),
+      el("div", {}, el("span", { text: "Photos" }), el("b", { text: String(m.photos || 0) }))),
+    el("p", { class: "small muted", text: "Your supervisor and HQ can see it now. Need to change something? Ask HQ to reopen the count." }),
+    el("button", { class: "btn primary block big1", style: "background:var(--ink);border-color:var(--ink);color:var(--bg)", text: "Done · log out", onclick: function () { if (hooks.counterLogout) hooks.counterLogout(true); } }));
+}
+
+/* one SKU, full screen: every batch, steppers, total, remarks; Save & next */
+export function openSku(s) {
+  var m = cur(); if (!m) return;
+  S.openSku = s.code;
+  var locked = m.status === "submitted" || (closed() && !isAdmin());
+  var old = document.getElementById("skuv"); if (old) old.remove();
+  var v = el("div", { id: "skuv", role: "dialog", "aria-modal": "true", "aria-label": s.desc || s.code });
+  document.body.append(v); document.body.classList.add("noscroll");
+  var nav = (S.navList || []).slice(); if (nav.indexOf(s.code) < 0) nav.unshift(s.code);
+  var pos = nav.indexOf(s.code);
+  function close() { S.openSku = null; v.remove(); document.body.classList.remove("noscroll"); hooks.render(); }
+  function go(code) { var x = S.skuIndex[code]; if (x) openSku(x); else close(); }
+  function nextCode() {
+    for (var i = pos + 1; i < nav.length; i++) { var x = S.skuIndex[nav[i]]; if (x && !skuDone(x)) return nav[i]; }
+    for (var j = 0; j < pos; j++) { var y = S.skuIndex[nav[j]]; if (y && !skuDone(y)) return nav[j]; }
+    return null;
+  }
+  function draw() {
+    v.innerHTML = "";
+    var sum = skuSummary(s);
+    v.append(el("div", { class: "svtop" },
+      el("button", { class: "iconbtn", "aria-label": "Back to list", onclick: close }, svg(ICON.close, 22)),
+      el("span", { class: "small muted num", text: "SKU " + (pos + 1) + " of " + nav.length }),
+      el("span", { class: "row", style: "gap:0" },
+        el("button", { class: "iconbtn", "aria-label": "Previous SKU", disabled: pos <= 0, onclick: function () { go(nav[pos - 1]); } }, svg(ICON.back, 22)),
+        el("button", { class: "iconbtn", "aria-label": "Next SKU", disabled: pos >= nav.length - 1, onclick: function () { go(nav[pos + 1]); } }, svg(ICON.next, 22)))));
+    var conv = []; if (s.per) conv.push("1 carton = " + fmt(s.per) + " pcs"); if (s.perBox) conv.push("1 box = " + fmt(s.perBox) + " pcs");
+    var bodyEl = el("div", { class: "svbody" },
+      el("div", { class: "row", style: "gap:6px" }, el("span", { class: "small muted num", text: s.code }), rcSku(s.code) ? el("span", { class: "pill bad", text: "⚠ Recount" }) : null),
+      el("h1", { class: "svname", text: s.desc || s.code }),
+      el("div", { class: "small muted", text: conv.join(" · ") || "No carton factor yet - count in pieces" }));
+    var bl = skuBatches(s); if (!bl.length && !locked) bl = [""];
+    bl.forEach(function (b) { bodyEl.append(batchRow(s, b, locked, draw)); });
+    if (!locked) bodyEl.append(el("button", { class: "btn block", text: "+ Add batch date", onclick: function () {
+      pickBatch(s, "", function (b) {
+        if (lines()[lk(s.code, b)] || skuBatches(s).indexOf(b) >= 0) { msg("Already listed", "Batch " + bLabel(b) + " is already on this SKU."); return; }
+        setLine(s, b, {}); draw();
+      });
+    } }));
+    if (sum && bl.length > 1) bodyEl.append(el("div", { class: "svtotal" }, el("span", { text: "SKU total" }), el("b", { text: sum.txt })));
+    v.append(bodyEl);
+    var foot = el("div", { class: "svfoot" });
+    if (locked) foot.append(el("button", { class: "btn block big1", text: "Back to list", onclick: close }));
+    else {
+      var nx = nextCode();
+      foot.append(el("button", { class: "btn primary block big1", onclick: function () { if (nx) go(nx); else close(); } }, el("span", { text: nx ? "Save & next SKU" : "Save & back to list" }), svg(ICON.arrow, 20)));
+      if (!sum) foot.append(el("button", { class: "link strong zero", text: "None on the floor (count as 0)", onclick: function () {
+        var b0 = skuBatches(s)[0] || ""; setLine(s, b0, { ctn: null, box: null, pcs: 0 }); toast(s.code + " counted as 0"); if (nx) go(nx); else close();
+      } }));
+    }
+    v.append(foot);
+  }
+  draw();
 }
 
 export function photoNeed(m) {
@@ -184,13 +286,16 @@ function photoModal(m, locked) {
 }
 
 function submitFlow(m, expected) {
-  var left = expected.filter(function (s) { return !skuDone(s); }).length;
-  var counted = Object.keys(m.lines || {}).filter(function (k) { return hasQty(m.lines[k]); }).length;
-  var pr = photoNeed(m);
+  var notDone = expected.filter(function (s) { return !skuDone(s); });
+  var L = m.lines || {}, keys = Object.keys(L).filter(function (k) { return hasQty(L[k]); });
+  var skuN = {}; keys.forEach(function (k) { skuN[L[k].code] = 1; });
+  var zero = Object.keys(skuN).filter(function (c) { return keys.filter(function (k) { return L[k].code === c; }).every(function (k) { var l = L[k]; return !(l.ctn || l.box || l.pcs); }); });
+  var rem = keys.filter(function (k) { return L[k].remark; }).length, extra = (m.extraSkus || []).length;
+  var pr = photoNeed(m), tst = $("#toast"); if (tst) tst.classList.remove("on");
   openModal(function (sh) {
     var who = (m.names && m.names.length) ? m.names : [m.member], pads = who.map(function (n) { return sigPad(n, function () { upd(); }); });
-    var cb = el("input", { type: "checkbox", style: "width:22px;height:22px" }), note = el("div", { class: "small", style: "color:var(--bad);font-weight:600;min-height:18px" });
-    var go = el("button", { class: "btn primary", style: "flex:1", text: "Yes, submit", disabled: true, onclick: async function () {
+    var cb = el("input", { type: "checkbox", style: "width:22px;height:22px;flex-shrink:0;margin:0" }), note = el("div", { class: "small", style: "color:var(--bad);font-weight:600;min-height:18px" });
+    var go = el("button", { class: "btn primary block big1", text: "Submit count", disabled: true, onclick: async function () {
       if (go.disabled) return;
       var at = nowIso(); m.sign = {}; pads.forEach(function (p) { m.sign[p.name] = { img: p.png(), at: at }; });
       go.disabled = true; go.textContent = "Submitting…";
@@ -198,26 +303,47 @@ function submitFlow(m, expected) {
         await flush();
         var r = await rpc("counter_submit", { p_token: tokenFor(m.branch), p_device: S.device, p_id: m.id, p_data: dataOfLocal(m) });
         S.mine.sessions[m.id] = fromServer(r.session); backup();
-        closeModal(); hooks.render(); window.scrollTo(0, 0); toast("Submitted ✓");
+        closeModal(); hooks.render(); window.scrollTo(0, 0);
       } catch (e) {
-        go.textContent = "Yes, submit"; upd();
+        go.textContent = "Submit count"; upd();
         note.textContent = e.code === "OFFLINE" ? "No connection. Your counts are kept on this phone - try again when online." : errText(e);
       }
     } });
-    var phBox = pr.on ? photoBlock(m, false, function () { upd(); }) : null;
-    function upd() { go.disabled = !(cb.checked && pads.every(function (p) { return p.signed(); }) && (!pr.on || (m.photos || 0) >= pr.min)); }
+    var dots = {};
+    function dot(k, n) { return dots[k] = el("span", { class: "rdot", text: String(n) }); }
+    function setDot(k, ok, n) { var d = dots[k]; if (!d) return; d.classList.toggle("ok", ok); d.innerHTML = ""; if (ok) d.append(svg(ICON.check, 15)); else d.textContent = String(n); }
+    var phBox = pr.on ? photoBlock(m, false, function () { upd(); }) : null, phCount = el("span", { class: "rcount num" });
+    var sgCount = el("span", { class: "rcount num" });
+    function upd() {
+      var phOk = !pr.on || (m.photos || 0) >= pr.min, sgOk = pads.every(function (p) { return p.signed(); });
+      go.disabled = !(cb.checked && sgOk && phOk);
+      setDot("ph", phOk, 2); setDot("sg", sgOk, pr.on ? 3 : 2);
+      phCount.textContent = (m.photos || 0) + " of " + pr.min + "–" + pr.max; phCount.classList.toggle("ok", phOk);
+      var ns = pads.filter(function (p) { return p.signed(); }).length; sgCount.textContent = ns + " of " + pads.length; sgCount.classList.toggle("ok", sgOk);
+    }
     cb.addEventListener("change", upd);
-    sh.append(el("h3", { text: "⚠️ Are you sure you want to submit?" }),
-      el("div", { class: "banner warn", style: "margin:8px 0" }, "Once submitted, you CANNOT edit this count. Only your admin can reopen it."),
-      el("p", { class: "small", text: m.branch + " · " + roleName(sessRole(m)) + " · " + m.member }),
-      el("p", { class: "small", text: counted + " batch line(s) counted." }),
-      left ? el("p", { class: "small", style: "color:var(--bad);font-weight:600", text: left + " SKU(s) in this branch are NOT counted yet. Not counted is not the same as zero - use 0 if there is no stock." }) : el("p", { class: "small", style: "color:var(--ok)", text: "All branch SKUs have a count." }),
-      pr.on ? el("div", { class: "card", style: "padding:10px;margin:10px 0" }, el("div", { style: "font-weight:700", text: "📷 Warehouse photos (" + pr.min + "–" + pr.max + " required)" }), phBox) : null,
-      el("label", { class: "row", style: "gap:10px;margin:12px 0;font-weight:600;flex-wrap:nowrap" }, cb, "I have checked all counts and want to submit."),
-      el("p", { class: "small", style: "font-weight:600;margin:4px 0" }, who.length > 1 ? "Each counter signs below (finger or stylus):" : "Sign below (finger or stylus):"),
-      el("div", {}, pads.map(function (p) { return p.node; })), note,
-      el("div", { class: "row" }, el("button", { class: "btn", style: "flex:1", text: "Go back", onclick: closeModal }), go));
-  });
+    var c1 = el("div", { class: "rsec" }, el("div", { class: "rsh" }, dot("ct", 1), el("b", { text: "Counts" }), el("span", { class: "rcount num" + (notDone.length ? "" : " ok"), text: (expected.length - notDone.length) + " of " + expected.length })));
+    var facts = el("div", { class: "rfacts" });
+    if (notDone.length) facts.append(el("div", { class: "warnline" }, el("span", { text: notDone.length + " SKU" + (notDone.length > 1 ? "s" : "") + " NOT counted yet" }),
+      el("button", { class: "link strong", text: "Count them", onclick: function () { closeModal(); S.filter = "todo"; hooks.render(); window.scrollTo(0, 0); } })),
+      el("div", { class: "small muted", text: "Not counted is not the same as zero - use 0 if there is no stock." }));
+    else facts.append(el("div", { class: "okline", text: "All SKUs on your list have a count." }));
+    facts.append(el("div", {}, el("span", { text: "Batch lines counted" }), el("b", { class: "num", text: String(keys.length) })));
+    if (zero.length) facts.append(el("div", {}, el("span", { text: "Counted as zero" }), el("b", { class: "num", text: zero.length + " SKU" + (zero.length > 1 ? "s" : "") })));
+    if (extra) facts.append(el("div", {}, el("span", { text: "Not on the list, added" }), el("b", { class: "num", text: extra + " SKU" + (extra > 1 ? "s" : "") })));
+    if (rem) facts.append(el("div", {}, el("span", { text: "Remarks" }), el("b", { class: "num", text: String(rem) })));
+    c1.append(facts); setTimeout(function () { setDot("ct", !notDone.length, 1); }, 0);
+    var secs = [c1];
+    if (pr.on) secs.push(el("div", { class: "rsec" }, el("div", { class: "rsh" }, dot("ph", 2), el("b", { text: "Warehouse photos" }), phCount),
+      el("div", { class: "small muted", style: "margin:-2px 0 8px", text: "Camera only. Each photo is stamped with the date, time, GPS and address." }), phBox));
+    secs.push(el("div", { class: "rsec" }, el("div", { class: "rsh" }, dot("sg", pr.on ? 3 : 2), el("b", { text: who.length > 1 ? "Everyone signs" : "Sign" }), sgCount),
+      el("div", { class: "small muted", style: "margin:-2px 0 8px", text: "Finger or stylus" }), el("div", {}, pads.map(function (p) { return p.node; }))));
+    sh.append(el("div", { class: "rvtop" }, el("button", { class: "iconbtn", "aria-label": "Back to the list", onclick: closeModal }, svg(ICON.back, 22)), el("h3", { text: "Review & submit" })),
+      el("p", { class: "small muted", style: "margin:0 0 10px", text: m.branch + " · " + roleName(sessRole(m)) + " · " + m.member }));
+    secs.forEach(function (x) { sh.append(x); });
+    sh.append(el("div", { class: "rvfoot" }, el("label", { class: "row", style: "gap:10px;flex-wrap:nowrap;align-items:flex-start;font-weight:600;line-height:1.35" }, cb, "I have checked all counts. After submitting, only HQ can reopen this count."), note, go));
+    upd();
+  }, "full");
 }
 function dataOfLocal(m) { return { member: m.member || "", names: m.names || [], countedBy: m.countedBy || "", lines: m.lines || {}, extraSkus: m.extraSkus || [], sign: m.sign || null, startedAt: m.startedAt || "", unknownBarcodes: m.unknownBarcodes || {} }; }
 
@@ -249,23 +375,14 @@ export function skuBatches(s) {
   skuLines(s.code).forEach(function (l) { if (list.indexOf(l.batch || "") < 0) list.push(l.batch || ""); });
   return list.sort();
 }
-export function refreshProgress() { if (!S.expected || !S.progTxt) return; var d = S.expected.filter(skuDone).length, p = S.expected.length ? Math.round(d / S.expected.length * 100) : 0; S.progTxt.textContent = d + " / " + S.expected.length + " SKUs counted (" + p + "%)"; S.progBar.style.width = p + "%"; }
+export function refreshProgress() { if (!S.expected || !S.progTxt) return; var d = S.expected.filter(skuDone).length, p = S.expected.length ? Math.round(d / S.expected.length * 100) : 0; S.progTxt.textContent = d + " / " + S.expected.length + " SKUs counted"; S.progBar.style.width = p + "%"; }
 function skuCard(s, locked) {
-  var sum = skuSummary(s), open = !!S.open[s.code], card = el("div", { class: "sku" + (sum ? " done" : "") });
-  function redraw() { var n = skuCard(s, locked); card.replaceWith(n); card = n; }
-  card.append(el("div", { class: "skuh", onclick: function () { S.open[s.code] = !open; redraw(); } },
-    el("div", { style: "flex:1" }, el("div", { class: "code" }, s.code, rcSku(s.code) ? el("span", { class: "pill bad", style: "margin-left:6px", text: "⚠ Recount" }) : null), el("div", { class: "desc", text: s.desc || "" })),
-    el("div", { class: "tot" }, sum ? el("span", { style: "font-size:13px", text: sum.txt }) : el("span", { class: "muted", text: "-" }), el("small", { text: sum ? (sum.n + " batch" + (sum.n > 1 ? "es" : "")) : "tap to count" }))));
-  if (!open) return card;
-  var body = el("div", { class: "body" });
-  skuBatches(s).forEach(function (b) { body.append(batchRow(s, b, locked, redraw)); });
-  if (!locked) body.append(el("button", { class: "btn block", text: "+ Add batch date", onclick: function () {
-    pickBatch(s, "", function (b) {
-      if (lines()[lk(s.code, b)] || skuBatches(s).indexOf(b) >= 0) { msg("Already listed", "Batch " + bLabel(b) + " is already on this SKU."); return; }
-      setLine(s, b, {}); redraw();
-    });
-  } }));
-  card.append(body); return card;
+  var sum = skuSummary(s), rc = rcSku(s.code);
+  return el("div", { class: "sku" + (sum ? " done" : "") },
+    el("button", { class: "skuh", onclick: function () { openSku(s); } },
+      el("span", { class: "sbadge" + (rc ? " rc" : sum ? " ok" : "") }, rc ? "R" : sum ? svg(ICON.check, 15) : ""),
+      el("span", { class: "sinfo" }, el("span", { class: "desc", text: s.desc || s.code }), el("span", { class: "code", text: s.code + (rc ? " · recount" : "") + (sum && sum.n > 1 ? " · " + sum.n + " batches" : "") })),
+      el("span", { class: "tot" + (sum ? " ok" : "") }, sum ? sum.txt : "To count")));
 }
 function batchRow(s, b, locked, redraw) {
   var k = lk(s.code, b), l = lines()[k] || { code: s.code, batch: b, ctn: null, box: null, pcs: null, remark: "" }, rc = rcMap();
@@ -323,8 +440,8 @@ export function pickBatch(s, cur0, done) {
   });
 }
 function peoplePicker(mine, others, multi, selected, onChange) {
-  var sel = selected.slice(), wrap = el("div"), g = el("div", { class: "grid" }), more = el("div", { class: "grid hidden", style: "margin-top:8px" });
-  function btn(n) { return el("button", { class: "big" + (sel.indexOf(n) >= 0 ? " on" : ""), text: n + (multi && sel.indexOf(n) >= 0 ? " ✓" : ""), onclick: function () { var i = sel.indexOf(n); if (multi) { if (i >= 0) sel.splice(i, 1); else sel.push(n); } else sel = [n]; draw(); onChange(sel.slice()); } }); }
+  var sel = selected.slice(), wrap = el("div"), g = el("div", { class: "chiprow" }), more = el("div", { class: "chiprow hidden", style: "margin-top:8px" });
+  function btn(n) { return el("button", { class: "big namechip" + (sel.indexOf(n) >= 0 ? " on" : ""), "aria-pressed": String(sel.indexOf(n) >= 0), text: (sel.indexOf(n) >= 0 ? "✓ " : "") + n, onclick: function () { var i = sel.indexOf(n); if (multi) { if (i >= 0) sel.splice(i, 1); else sel.push(n); } else sel = [n]; draw(); onChange(sel.slice()); } }); }
   var typed = el("input", { type: "text", placeholder: "Type a name" });
   function draw() {
     g.innerHTML = ""; more.innerHTML = "";
@@ -355,6 +472,30 @@ function namesFor(br, role) {
   rem.forEach(function (n) { if (mine.indexOf(n) < 0) mine.push(n); });
   return { mine: mine, others: others };
 }
+/* time left until the daily count window ends (phone clock, Malaysia) */
+export function timeLeft(t) {
+  t = t || S.take || {};
+  if (t.kind !== "daily" || !t.countTo || !t.countDate) return null;
+  var end = new Date(t.countDate + "T" + t.countTo + ":00"), mins = Math.round((end - new Date()) / 60000);
+  if (isNaN(mins)) return null;
+  if (mins < 0) return { late: true, txt: "Past " + t.countTo + " · submit now", short: "past " + t.countTo };
+  var h = Math.floor(mins / 60), m = mins % 60;
+  return { late: false, txt: (h ? h + " h " : "") + m + " min left · finish by " + t.countTo, short: (h ? h + " h " : "") + m + " min" };
+}
+function svg(path, size) {
+  var x = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  x.setAttribute("width", size || 20); x.setAttribute("height", size || 20); x.setAttribute("viewBox", "0 0 24 24"); x.setAttribute("fill", "none");
+  x.setAttribute("stroke", "currentColor"); x.setAttribute("stroke-width", "2"); x.setAttribute("stroke-linecap", "round"); x.setAttribute("stroke-linejoin", "round"); x.setAttribute("aria-hidden", "true");
+  x.innerHTML = path; return x;
+}
+export var ICON = {
+  back: '<path d="M15 6l-6 6 6 6"/>', next: '<path d="M9 6l6 6-6 6"/>', close: '<path d="M6 6l12 12M18 6L6 18"/>', home: '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-7h6v7"/>',
+  check: '<path d="M5 12l5 5L20 7"/>', more: '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
+  scan: '<path d="M4 7V5a1 1 0 011-1h2M17 4h2a1 1 0 011 1v2M20 17v2a1 1 0 01-1 1h-2M7 20H5a1 1 0 01-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>', camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'
+};
+export { svg };
+
 function renderStart(app) {
   var ss = S.mine.sessions || {}, keys = Object.keys(ss), st = S.start || (S.start = { step: "code" });
   if (S.cfg && !S.cfg.ownerReady) {
@@ -364,77 +505,99 @@ function renderStart(app) {
       el("button", { class: "btn primary", text: "Start first-time setup", onclick: function () { if (hooks.openLogin) hooks.openLogin(true); } })));
     return;
   }
-  function stepBar(n) {
-    var labels = singleMode() ? ["Warehouse", "Name"] : ["Warehouse", "Team", "Name"]; if (singleMode() && n === 2) n = 1;
-    return el("div", { class: "steps" }, labels.map(function (t, i) { return el("div", { class: "stp" + (i < n ? " done" : i === n ? " now" : "") }, el("i"), el("span", { text: t })); }));
-  }
   function reset() { S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); }
 
   if (st.step === "code") {
+    var wrap = el("div", { class: "cstart" });
     if (S.take && S.take.status === "closed") keys = keys.filter(function (k) { return ss[k].dirty; });
+    keys = keys.filter(function (k) { return ss[k].dirty || !(S.take && S.take.status === "closed"); });
+    var last = store("ndd2-last"), pp = plantPad("Start counting", "Enter your warehouse plant code, for example 1508.", null, function (br) {
+      S.start = { step: "confirm", branch: br }; hooks.render(); window.scrollTo(0, 0);
+    }, true);
     if (keys.length) {
-      app.append(el("h2", { text: "Continue a count" }));
-      var cg = el("div", { class: "grid", style: "margin-bottom:18px" });
+      wrap.append(el("h2", { text: "Continue a count" }));
+      var cg = el("div", { class: "resume" });
       keys.forEach(function (k) {
         var x = ss[k], n = Object.keys(x.lines || {}).filter(function (j) { return hasQty(x.lines[j]); }).length;
-        if (!x.dirty && S.take && S.take.status === "closed") return;   /* nothing left to do in a closed stock take */
-        cg.append(el("button", { class: "big" + (S.mine.active === k ? " on" : ""), onclick: function () { withPin(x.branch, function () { S.mine.active = k; S.step = ""; S.start = null; backup(); hooks.render(); window.scrollTo(0, 0); schedule(200); }); } },
-          el("div", { text: x.branch }), el("div", { class: "small", style: "font-weight:700;color:" + (sessRole(x) === "fin" ? "var(--accent)" : "var(--ok)"), text: roleName(sessRole(x)).toUpperCase() }),
-          el("div", { class: "small muted", style: "font-weight:400", text: x.member }),
-          el("div", { class: "small muted", style: "font-weight:400", text: n + " line" + (n === 1 ? "" : "s") + (x.status === "submitted" ? " · submitted ✓" : "") })));
+        cg.append(el("button", { class: "big rcard" + (S.mine.active === k ? " on" : ""), onclick: function () { withPin(x.branch, function () { S.mine.active = k; S.step = ""; S.start = null; backup(); hooks.render(); window.scrollTo(0, 0); schedule(200); }); } },
+          el("span", { class: "ric" }, svg(ICON.home)),
+          el("span", { class: "rtx" }, el("span", { class: "rt", text: x.branch }),
+            el("span", { class: "small muted", text: roleName(sessRole(x)) + " · " + x.member + " · " + n + " line" + (n === 1 ? "" : "s") + (x.status === "submitted" ? " · submitted ✓" : "") })),
+          svg(ICON.next, 18)));
       });
-      app.append(cg, el("h2", { style: "margin-top:8px", text: "Or start a new count" }));
+      wrap.append(cg, el("h2", { style: "margin-top:20px", text: "Or start a new count" }));
+    } else if (last && last.code) {
+      wrap.append(el("button", { class: "big rcard", onclick: function () { pp.login(last.code); } },
+        el("span", { class: "ric" }, svg(ICON.home)),
+        el("span", { class: "rtx" }, el("span", { class: "small muted", text: "Continue as last time" }), el("span", { class: "rt", text: last.branch + " · " + last.code })),
+        svg(ICON.next, 18)));
     }
-    app.append(stepBar(0), el("div", { class: "card", style: "max-width:420px;margin:0 auto" },
-      plantPad("Enter your warehouse plant code", "The SAP plant code of the warehouse you are counting, for example 1508.", null, function (br) {
-        S.start = { step: "confirm", branch: br }; hooks.render(); window.scrollTo(0, 0);
-      }, true)),
-      el("p", { class: "center small", style: "margin-top:14px" }, el("button", { class: "link", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })));
+    wrap.append(el("div", { class: "card padcard" }, pp),
+      el("p", { class: "center", style: "margin-top:14px" }, el("button", { class: "link strong", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })));
+    app.append(wrap);
     return;
   }
-  if (st.step === "confirm") {
-    var ts = tstatus();
-    app.append(stepBar(0));
-    if (ts !== "open") {
-      app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: st.branch }),
-        el("h2", { text: S.notOpenMsg ? (ts === "draft" ? "Nothing to count right now" : "Today's count is closed") : ts === "draft" ? "Counting hasn't started yet" : "Counting is closed" }),
-        el("p", { class: "muted", text: S.notOpenMsg || (ts === "draft" ? "Your admin will open the stock take. Try again when they tell you it's open." : "This stock take is finished. Ask your admin if something still needs counting.") }),
-        el("div", { class: "row", style: "justify-content:center" },
-          el("button", { class: "btn primary", text: "Try again", onclick: async function () { S.notOpenMsg = ""; try { var bd = await rpc("counter_branch", { p_token: S.tokens[st.branch], p_branch: st.branch }); S.take = bd.take; } catch (e) { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e2) { } } hooks.render(); } }),
-          el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
-      return;
-    }
-    app.append(el("div", { class: "card center" }, el("div", { class: "small muted", text: "Your warehouse" }), el("h2", { style: "font-size:24px;margin:6px 0 14px", text: st.branch }),
-      kindLabel(),
+
+  /* ---- ready: warehouse + what today's count is + team + names, on one screen ---- */
+  var ts = tstatus(), t = S.take || {};
+  var top = el("div", { class: "rhead" },
+    el("button", { class: "iconbtn", "aria-label": "Different warehouse", onclick: reset }, svg(ICON.back, 22)),
+    el("div", {}, el("div", { class: "rt", text: st.branch }), el("div", { class: "small muted", text: "Your warehouse" })));
+  app.append(top);
+  if (ts !== "open") {
+    app.append(el("div", { class: "card center" },
+      el("h2", { text: S.notOpenMsg ? (ts === "draft" ? "Nothing to count right now" : "Today's count is closed") : ts === "draft" ? "Counting hasn't started yet" : "Counting is closed" }),
+      el("p", { class: "muted", text: S.notOpenMsg || (ts === "draft" ? "Your admin will open the stock take. Try again when they tell you it's open." : "This stock take is finished. Ask your admin if something still needs counting.") }),
       el("div", { class: "row", style: "justify-content:center" },
-        el("button", { class: "btn primary", text: "Yes, that's my warehouse", onclick: function () { if (singleMode()) { st.role = "ops"; st.names = st.names || []; st.step = "names"; } else st.step = "team"; hooks.render(); } }),
-        el("button", { class: "btn", text: "No, enter again", onclick: reset }))));
+        el("button", { class: "btn primary", text: "Try again", onclick: async function () { S.notOpenMsg = ""; try { var bd = await rpc("counter_branch", { p_token: S.tokens[st.branch], p_branch: st.branch }); S.take = bd.take; } catch (e) { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e2) { } } hooks.render(); } }),
+        el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
     return;
   }
-  if (st.step === "team") {
-    app.append(stepBar(1), el("h2", { text: "Which team are you?" }), el("p", { class: "small muted", text: st.branch }));
-    var rg = el("div", { class: "grid" });
+  if (singleMode() && !st.role) { st.role = "ops"; st.names = st.names || []; }
+  var daily = t.kind === "daily", n = t.skuCount, tl = timeLeft(t), pr = S.cfg || {};
+  var task = el("div", { class: "task" }, kindLabel());
+  var body = el("div", { class: "tbody" });
+  body.append(el("div", { class: "tbig" }, el("b", { text: daily || t.scope === "partial" ? String(n || 0) : "All" }), el("span", { text: daily ? "SKUs to count today" : t.scope === "partial" ? "SKUs on your list" : "SKUs with stock in this warehouse" })));
+  var facts = el("div", { class: "facts" });
+  if (daily) facts.append(el("div", {}, el("small", { text: "Finish by" }), el("b", { text: t.countTo || "-" })), el("div", { class: tl && tl.late ? "late" : "" }, el("small", { text: "Time left" }), el("b", { text: tl ? tl.short : "-" })));
+  else facts.append(el("div", {}, el("small", { text: "Count" }), el("b", { text: singleMode() ? "Single" : "Ops + Finance" })), el("div", {}, el("small", { text: "Stock" }), el("b", { text: t.stockType === "bad" ? "Bad stock" : "Good stock" })));
+  body.append(facts);
+  var nPh = (pr.photoRoles || []).length ? Number(pr.photoMin) || 0 : 0;
+  body.append(el("div", { class: "todo" }, el("small", { text: "What you'll do" }),
+    el("div", {}, el("i", { text: "1" }), daily ? "Count " + (n || 0) + " SKUs, every batch you find" : "Count every SKU and batch on your list"),
+    el("div", {}, el("i", { text: "2" }), nPh ? "Take " + nPh + " photos of the warehouse" : "Check your counts"),
+    el("div", {}, el("i", { text: "3" }), "Everyone signs, then submit")));
+  task.append(body); app.append(task);
+
+  if (!singleMode()) {
+    app.append(el("h2", { class: "sect", text: "Which team are you?" }));
+    var rg = el("div", { class: "grid2c" });
     [["ops", "Operations", "Ops team counts the stock"], ["fin", "Finance", "Finance counts again, separately"]].forEach(function (r) {
-      rg.append(el("button", { class: "big", onclick: function () {
+      rg.append(el("button", { class: "big" + (st.role === r[0] ? " on" : ""), "aria-pressed": String(st.role === r[0]), onclick: function () {
         var other = Object.keys(S.mine.sessions).some(function (k2) { var x2 = S.mine.sessions[k2]; return x2.branch === st.branch && sessRole(x2) !== r[0] && sessHasQty(x2); });
         if (other && !isOwner()) { msg("Not allowed", "This phone already has a " + roleName(r[0] === "ops" ? "fin" : "ops") + " for " + st.branch + ". Ops and Finance must count on different phones so the two counts stay independent."); return; }
-        st.role = r[0]; st.names = []; st.step = "names"; hooks.render();
+        if (st.role !== r[0]) st.names = []; st.role = r[0]; hooks.render();
       } }, el("div", { text: r[1] }), el("div", { class: "small muted", style: "font-weight:400", text: r[2] })));
     });
-    app.append(rg, el("p", { class: "small", style: "margin:12px 0 0;color:var(--warn);font-weight:600", text: "Both teams count everything on their own. Do not share or compare numbers - the app compares them." }),
-      el("button", { class: "link", text: "← Back", onclick: function () { st.step = "confirm"; hooks.render(); } }));
-    return;
+    app.append(rg, el("p", { class: "small", style: "margin:8px 0 0;color:var(--warn);font-weight:600", text: "Both teams count everything on their own. Do not share or compare numbers - the app compares them." }));
   }
-  /* names */
-  var role = st.role, names = st.names || [], list = namesFor(st.branch, role === "fin" ? "Checker" : "Counter");
-  var startBtn = el("button", { class: "btn primary block", style: "margin-top:18px", text: "Start counting", onclick: go });
-  function upd() { startBtn.disabled = !names.length; startBtn.textContent = names.length ? "Start " + roleName(role).toLowerCase() : (role === "fin" ? "Add your name first" : "Add at least one name"); }
-  app.append(stepBar(2), el("h2", { text: role === "fin" ? "Your name" : "Who is counting?" }), el("p", { class: "small muted", text: st.branch + (singleMode() ? "" : " · " + (role === "fin" ? "Finance" : "Operations")) + (role === "ops" ? " · add everyone counting together on this phone" : "") }),
-    peoplePicker(list.mine, list.others, role === "ops", names, function (v) { names = v; st.names = v; upd(); }), startBtn,
-    el("button", { class: "link", text: "← Back", onclick: function () { st.step = singleMode() ? "confirm" : "team"; hooks.render(); } }));
+  var role = st.role, names = st.names || [];
+  var startBtn = el("button", { class: "btn primary block big1", text: "Start counting", onclick: go });
+  function upd() {
+    startBtn.disabled = !role || !names.length;
+    var lab = singleMode() ? "Start count" : role === "fin" ? "Start finance check" : "Start ops count";
+    startBtn.textContent = !role ? "Pick your team first" : names.length ? lab + (role === "ops" && names.length > 1 ? " · " + names.length + " people" : "") : (role === "fin" ? "Add your name first" : "Pick who is counting");
+  }
+  if (role) {
+    var list = namesFor(st.branch, role === "fin" ? "Checker" : "Counter");
+    app.append(el("div", { class: "sect row", style: "justify-content:space-between;align-items:baseline" }, el("h2", { style: "margin:0", text: role === "fin" ? "Your name" : "Who is counting?" }),
+      el("span", { class: "small muted", text: role === "ops" ? "Tap everyone counting on this phone" : "" })),
+      peoplePicker(list.mine, list.others, role === "ops", names, function (v) { names = v; st.names = v; upd(); }));
+  }
   upd();
+  $("#foot").classList.remove("hidden"); var fi = $("#footIn"); fi.innerHTML = ""; fi.append(startBtn);
   async function go() {
-    if (!names.length) return;
+    if (!names.length || !role) return;
     var pickBr = st.branch;
     rememberNames(pickBr, role, names);
     var who = names.join(", "), data = { member: who, names: names.slice(), countedBy: role === "ops" ? who : "", startedAt: nowIso(), lines: {} };
@@ -442,10 +605,10 @@ function renderStart(app) {
     if (existing) { var e0 = S.mine.sessions[existing]; data.lines = e0.lines; data.extraSkus = e0.extraSkus; data.startedAt = e0.startedAt; }
     startBtn.disabled = true;
     try {
-      var s = await rpc("counter_start", { p_token: tokenFor(pickBr), p_device: S.device, p_branch: pickBr, p_role: role, p_data: data });
-      var loc = fromServer(s);
+      var s2 = await rpc("counter_start", { p_token: tokenFor(pickBr), p_device: S.device, p_branch: pickBr, p_role: role, p_data: data });
+      var loc = fromServer(s2);
       if (existing && S.mine.sessions[existing].dirty) { loc.lines = S.mine.sessions[existing].lines; loc.dirty = true; }
-      S.mine.sessions[loc.id] = loc; S.mine.active = loc.id; S.step = ""; S.start = null; backup();
+      S.mine.sessions[loc.id] = loc; S.mine.active = loc.id; S.step = ""; S.start = null; S.filter = "todo"; backup();
       if (loc.dirty) touch();
       await loadBranch(pickBr).catch(function () { });
       hooks.render(); window.scrollTo(0, 0);
