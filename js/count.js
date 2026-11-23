@@ -5,6 +5,7 @@ import { $, el, fmt, MON, bLabel, nowIso, tsTxt, openModal, closeModal, msg, con
 import { toPcs, hasQty, lk, monthOf, sessRole } from "./pure.js";
 import { openScanner, openScanSheet } from "./scan.js";
 import { photoBlock } from "./photos.js";
+import { APP_VERSION } from "./config.js";
 
 export var REMARKS = ["Damaged", "Expired", "Near expiry", "Wrong location"];
 function singleMode() { return !!(S.take && S.take.mode === "single"); }
@@ -563,7 +564,8 @@ function renderStart(app) {
         } }, svg(ICON.close, 18))));
     }
     wrap.append(el("div", { class: "card padcard" }, pp),
-      el("p", { class: "center", style: "margin-top:14px" }, el("button", { class: "link strong", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })));
+      el("p", { class: "center", style: "margin-top:14px" }, el("button", { class: "link strong", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })),
+      el("p", { class: "center small muted", style: "margin-top:18px", text: "Version " + APP_VERSION }));
     app.append(wrap);
     return;
   }
@@ -638,7 +640,9 @@ function renderStart(app) {
       var s2 = await rpc("counter_start", { p_token: tokenFor(pickBr), p_device: S.device, p_branch: pickBr, p_role: role, p_data: data });
       var loc = fromServer(s2);
       if (existing && S.mine.sessions[existing].dirty) { loc.lines = S.mine.sessions[existing].lines; loc.dirty = true; }
-      S.mine.sessions[loc.id] = loc; S.mine.active = loc.id; S.step = ""; S.start = null; S.filter = "todo"; backup();
+      S.mine.sessions[loc.id] = loc; S.mine.active = loc.id; S.step = ""; S.start = null; S.filter = "todo";
+      if (S.take && S.take.id && S.mine.takeId !== S.take.id) { S.mine.takeId = S.take.id; S.mine.resetId = S.take.resetId; }
+      backup();
       if (loc.dirty) touch();
       await loadBranch(pickBr).catch(function () { });
       hooks.render(); window.scrollTo(0, 0);

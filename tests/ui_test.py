@@ -124,6 +124,9 @@ with sync_playwright() as p:
     sl = op.evaluate("""async () => { const m = await import('./js/photos.js'); return [m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: {lat: 3.0732, lon: 101.5183, acc: 12}, addr: 'Jalan Test 23, Shah Alam', who: 'NDD Alpha · Stock take · Ali'}), m.stampLines({at: Date.UTC(2026, 10, 18, 2, 52, 13), pos: null})]; }""")
     check("stamp text: date+time MYT, GPS, address, who", sl[0] == ["18 Nov 2026, 10:52:13 MYT", "GPS 3.073200, 101.518300 (±12 m)", "Jalan Test 23, Shah Alam", "NDD Alpha · Stock take · Ali"], sl[0])
     check("stamp text without location: 'Location not shared'", sl[1] == ["18 Nov 2026, 10:52:13 MYT", "Location not shared"], sl[1])
+    op.evaluate("import('./js/state.js').then(m => { m.S.mine.takeId = '00000000-0000-0000-0000-000000000001'; m.S.mine.resetId = 'old'; })")   # phone used for an earlier stock take
+    op.evaluate("document.dispatchEvent(new Event('visibilitychange'))"); op.wait_for_timeout(2500)   # back from the camera: the app syncs
+    check("back from the camera: the count stays active (not back to the plant code)", op.evaluate("JSON.parse(localStorage.getItem('ndd2-mine')).active") is not None and op.is_visible("#modal.lock.on"))
     check("3 photos → Start counting", op.inner_text("#sheet button.big1") == "Start counting" and not op.is_disabled("#sheet button.big1")); op.click("#sheet button.big1"); op.wait_for_timeout(300)
     op.click(".skuh:has-text('B2')"); op.wait_for_selector("#skuv"); bt = op.locator("#skuv .batch").first
     check("one SKU at a time: no next-SKU button or arrows", not op.is_visible("#skuv >> text=Save & next SKU") and op.locator("#skuv [aria-label='Next SKU']").count() == 0 and op.is_visible("#skuv >> text=Save & back to list"))

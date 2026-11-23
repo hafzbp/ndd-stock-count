@@ -290,6 +290,15 @@ await t("no DELETE/UPDATE without WHERE (Supabase rejects them from the API - pg
   assert.deepEqual(bad, []);
 });
 
+await t("index.html and dashboard re-download every JS module on a new version", async () => {
+  const fs = await import("node:fs"), js = fs.readdirSync(new URL("../js/", import.meta.url)).filter((x) => x.endsWith(".js"));
+  const idx = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8"), dsh = fs.readFileSync(new URL("../dashboard/index.html", import.meta.url), "utf8");
+  assert.deepEqual(js.filter((f) => !idx.includes('"js/' + f + '"')), []);
+  assert.deepEqual(js.filter((f) => !dsh.includes('"../js/' + f + '"')), []);
+  const v = /APP_VERSION = "([^"]+)"/.exec(fs.readFileSync(new URL("../js/config.js", import.meta.url), "utf8"))[1];
+  assert.ok(idx.includes("app.css?v=" + v), "css ?v= matches APP_VERSION");
+});
+
 console.log("owner tools");
 await t("adding a known branch adds nothing", async () => {
   assert.equal(await rpc("admin_add_branches", { p_token: OWNER, p_branches: ["NDD Delta", "NDD Alpha"] }), 1);

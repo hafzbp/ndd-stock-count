@@ -66,8 +66,10 @@ export function applySync(res) {
     else if (S.mine.takeId !== t.id || S.mine.resetId !== t.resetId) {
       /* another stock take (next day, after logout, new monthly): forget counts that are already on the server,
          but keep changes not uploaded yet - they go up when this warehouse logs in again */
-      var keep = {}; Object.keys(S.mine.sessions).forEach(function (k) { if (S.mine.sessions[k].dirty) keep[k] = S.mine.sessions[k]; });
-      if (Object.keys(S.mine.sessions).length) changed = true;
+      var keep = {}, onSrv = {}; (res.sessions || []).forEach(function (x) { onSrv[x.id] = 1; });
+      Object.keys(S.mine.sessions).forEach(function (k) { if (S.mine.sessions[k].dirty || onSrv[k]) keep[k] = S.mine.sessions[k]; });
+      if (Object.keys(S.mine.sessions).length !== Object.keys(keep).length) changed = true;
+      /* the count in progress belongs to the new stock take (started just now on this phone): keep it active */
       S.mine = { takeId: t.id, resetId: t.resetId, sessions: keep, active: keep[S.mine.active] ? S.mine.active : null };
     }
   }
