@@ -21,7 +21,7 @@ export function docsFrom(sessions) {
   return (sessions || []).map(function (s) {
     var d = s.data || {};
     return { id: s.id, branch: s.branch, role: s.role, member: d.member || "", names: d.names || [], lines: d.lines || {}, extraSkus: d.extraSkus || [],
-      sign: d.sign || null, unknownBarcodes: d.unknownBarcodes || {}, status: s.status, submittedAt: s.submittedAt, updatedAt: s.updatedAt, photos: s.photos || 0, device: s.device };
+      sign: d.sign || null, unknownBarcodes: d.unknownBarcodes || {}, status: s.status, submittedAt: s.submittedAt, updatedAt: s.updatedAt, startedAt: s.startedAt, reopenedAt: s.reopenedAt, photos: s.photos || 0, device: s.device };
   });
 }
 export function branchesAdm() { return ((S.adm && S.adm.branches) || []).filter(function (b) { return b.active; }).map(function (b) { return b.name; }); }
@@ -49,7 +49,7 @@ async function reopenSess(d) {
   try { await rpc("admin_reopen", { p_token: S.admin.token, p_id: d.id }); await loadAdmin(); hooks.render(); }
   catch (e) { msg("Failed", errText(e)); }
 }
-function sendRecount(b, V) {
+export function sendRecount(b, V) {
   var items = V.filter(function (o) { return o.status === "RECOUNT" || /^WAITING/.test(o.status); }).map(function (o) { return lk(o.code, o.batch); });
   confirmBox(items.length ? "Send recount list?" : "Clear recount list?", items.length ? items.length + " line(s) at " + b + " where Ops and Finance differ, or only one team counted. Both teams see which SKU/batch to recount (not the numbers), and their submitted counts are reopened." : "No lines need a recount at " + b + ". This clears the recount banner on both teams' phones.", items.length ? "Send" : "Clear", async function () {
     try { await rpc("admin_send_recount", { p_token: S.admin.token, p_branch: b, p_items: items }); await loadAdmin(); hooks.render(); msg("Sent", "Recount list sent to " + b + "."); }

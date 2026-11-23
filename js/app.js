@@ -6,7 +6,8 @@ import { renderCount, withPin, loadMaster, loadBranch, roleName, kindShort } fro
 import { renderMaster, loadAdmin } from "./master.js";
 import { renderSetup } from "./setup.js";
 import { renderHome } from "./home.js";
-import { renderDaily, renderDash } from "./daily.js";
+import { renderDaily } from "./daily.js";
+import { renderDashTab } from "./mdash.js";
 import { renderSup, supLogin, supLogout, loadSupTok } from "./sup.js";
 import { renderToday } from "./today.js";
 import { svg, ICON } from "./count.js";
@@ -27,7 +28,7 @@ function render() {
   document.body.classList.toggle("adminui", isAdmin() && S.tab !== "count");
   if (S.tab === "today" && isAdmin()) renderToday(app);
   else if (S.tab === "daily" && isAdmin()) renderDaily(app);
-  else if (S.tab === "dash" && isAdmin()) renderDash(app);
+  else if (S.tab === "dash" && isAdmin()) renderDashTab(app);
   else if (S.tab === "sup" && supMode()) renderSup(app);
   else if (S.tab === "home" && isAdmin()) renderHome(app);
   else if (S.tab === "master" && isAdmin()) renderMaster(app);
@@ -176,7 +177,7 @@ async function tick() {
     if (S.saveErr && S.saveErr !== "PIN") { S.saveErr = null; flush(); }
     if (S.goneNote) { S.goneNote = false; closeModal(); var sv = document.getElementById("skuv"); if (sv) { sv.remove(); document.body.classList.remove("noscroll"); } S.openSku = null; render(); msg("Count removed by HQ", "HQ deleted this count or stopped today's count. Enter the plant code to see what to do next."); }
     if (changed && S.tab === "count" && !document.querySelector("#modal.on") && !document.querySelector(".ssheet") && !document.querySelector(".scanov") && !document.querySelector("#skuv")) render();
-    if (isAdmin() && (S.tab === "master" || (S.tab === "home" && S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open")) && !document.querySelector("#modal.on")) { await loadAdmin(); render(); }
+    if (isAdmin() && (S.tab === "master" || ((S.tab === "home" || (S.tab === "dash" && S.dashView === "monthly")) && S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open")) && !document.querySelector("#modal.on")) { await loadAdmin(); render(); }
     if (isAdmin() && S.tab === "daily" && S.dcc && S.dcc.date === S.dcc.today && !document.querySelector("#modal.on") && !document.activeElement.matches("input,select")) { S.dcc = null; render(); }
     syncPill();
   } catch (e) {

@@ -9,6 +9,7 @@ import { listPhotos } from "./photos.js";
 var V = new URL("../vendor/", import.meta.url).href;
 function roleName(r) { return r === "fin" ? "Finance check" : "Ops count"; }
 
+export async function zipLib() { if (typeof JSZip === "undefined") await loadJs(V + "jszip.min.js"); return window.JSZip; }
 export async function xlsxLib() { if (typeof XLSX === "undefined") await loadJs(V + "xlsx.full.min.js"); return window.XLSX; }
 async function pdfLibs() {
   if (!(window.jspdf && window.jspdf.jsPDF)) await loadJs(V + "jspdf.umd.min.js");
@@ -151,9 +152,10 @@ function photoPages(d, W, list, sg) {
   });
 }
 
-export async function signoffPdf(b) {
-  openModal(function (sh) { sh.append(el("h3", { text: "Preparing sign-off PDF…" }), el("p", { class: "muted", text: b })); });
-  var J; try { J = await pdfLibs(); } catch (e) { return fail(e); }
+/* quiet = for "Download all": no modals, returns { blob, name, final } instead of saving */
+export async function signoffPdf(b, quiet) {
+  if (!quiet) openModal(function (sh) { sh.append(el("h3", { text: "Preparing sign-off PDF…" }), el("p", { class: "muted", text: b })); });
+  var J; try { J = await pdfLibs(); } catch (e) { if (quiet) throw e; return fail(e); }
   var Vr = variance(b), ses = S.counts.filter(function (d) { return d.branch === b; }), ops = ses.filter(function (d) { return sessRole(d) === "ops"; }), fin = ses.filter(function (d) { return sessRole(d) === "fin"; });
   var lc = {}, sk = {}, sysV = 0, agV = 0, vv = 0; Vr.forEach(function (o) { lc[o.status] = (lc[o.status] || 0) + 1; sysV += (o.sys || 0) * (o.cost || 0); if (o.counted) agV += (o.phys || 0) * (o.cost || 0); vv += o.vv || 0; });
   var G = Vr.skuGroups || {}; Object.keys(G).forEach(function (c) { var f = G[c].flag; sk[f] = (sk[f] || 0) + 1; });
@@ -208,6 +210,7 @@ export async function signoffPdf(b) {
   d.autoTable({ startY: 19, theme: "grid", styles: { fontSize: 7, cellPadding: 1.2 }, headStyles: { fillColor: [60, 60, 60] }, head: head, body: cnt.map(row), columnStyles: cs, margin: { left: 14, right: 14 } });
   var n = d.getNumberOfPages(); for (var i = 1; i <= n; i++) { d.setPage(i); d.setFontSize(7); d.setTextColor(120); d.text(b + " - page " + i + " of " + n, W - 14, 290, { align: "right" }); d.setTextColor(0); }
   var fname = "SignOff_" + b.replace(/\s+/g, "_") + "_" + new Date().toISOString().slice(0, 10) + ".pdf";
+  if (quiet) return { blob: d.output("blob"), name: fname, final: !!final };
   window.__pdf = d.output("datauristring");
   saveBlob(d.output("blob"), fname);
   openModal(function (sh) { sh.append(el("h3", { text: "Saved ✓" }), el("p", { class: "muted", text: fname + (final ? "" : " (marked DRAFT)") }), el("button", { class: "btn block", text: "OK", onclick: closeModal })); });
