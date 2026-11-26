@@ -8,7 +8,7 @@ import { S, hooks } from "./state.js";
 import { rpc } from "./api.js";
 import { el, fmt, msg, confirmBox, openModal, closeModal, errText, toast, saveBlob } from "./ui.js";
 import { hasQty, sessRole } from "./pure.js";
-import { loadAdmin, variance, currentTake, isSingle, tolPct, sendRecount } from "./master.js";
+import { loadAdmin, variance, currentTake, isSingle, tolPct, sendRecount, skuMap } from "./master.js";
 import { exportXlsx, signoffPdf, zipLib } from "./export.js";
 import { listPhotos } from "./photos.js";
 import { deleteCountsModal } from "./hqreset.js";
@@ -68,6 +68,17 @@ var CSS = [
   ".md-flow .done i{background:var(--ok);color:var(--card)}.md-flow .now i{background:var(--accent);color:var(--card)}.md-flow small{display:block;color:var(--mute)}",
   ".md-back{border:0;background:none;color:var(--info);font:inherit;cursor:pointer;padding:0;margin-bottom:8px}",
   ".md-pos{color:var(--ok)}.md-neg{color:var(--bad)}.md-wn{color:var(--warn)}",
+  ".md-stack{display:flex;gap:2px;border-radius:99px;overflow:hidden;background:var(--chip);margin:8px 0 6px}.md-stack i{display:block;min-width:3px}",
+  ".md-hero{display:flex;flex-wrap:wrap;gap:16px 24px;align-items:stretch}.md-hero>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:200px;max-width:260px}",
+  ".md-hero>div:first-child b{font-size:44px;line-height:1.05;letter-spacing:-.02em}",
+  ".md-big{display:flex;align-items:baseline;gap:8px;margin:2px 0 2px}.md-big b{font-size:28px;letter-spacing:-.01em}",
+  ".md-ira{display:flex;flex-direction:column;gap:4px}.md-irarow{display:grid;grid-template-columns:110px minmax(0,1fr) 68px;gap:12px;align-items:center;border:0;background:none;font:inherit;color:inherit;padding:5px 4px;border-radius:8px;cursor:pointer;text-align:left}",
+  ".md-irarow:hover{background:var(--chip)}.md-irarow .nm{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.md-irarow b{text-align:right;font-variant-numeric:tabular-nums}",
+  ".md-irarow .tr{position:relative;height:12px;background:var(--chip);border-radius:99px}.md-irarow .tr i{position:absolute;left:0;top:0;bottom:0;border-radius:99px}",
+  ".md-irarow .tr u{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink);opacity:.55}",
+  ".md-irarow .tr small{position:absolute;left:18px;top:-2px;font-size:11px;color:var(--mute);line-height:16px}",
+  ".md-axis{cursor:default;padding-bottom:0}.md-axis:hover{background:none}.md-axis .tr{background:none;height:14px}.md-axis .tr small{left:auto;transform:translateX(-50%);top:0}",
+  "@media (max-width:640px){.md-hero>div:first-child{max-width:none}.md-irarow{grid-template-columns:82px minmax(0,1fr) 60px;gap:8px}}",
   "@media (max-width:640px){.md-tile b{font-size:19px}.md-grid{grid-template-columns:1fr}.md-stage{height:26px}}"
 ].join("");
 function ensureCss() { if (!document.getElementById("md-css")) document.head.append(el("style", { id: "md-css", text: CSS })); }
@@ -383,41 +394,129 @@ function renderWarehouse(app, b, t) {
 }
 
 /* ---------- final (closed) ---------- */
-function renderFinal(app, t) {
-  var f = filters(), W = branches().filter(f.keep).map(whState);
-  var sys = 0, abs = 0, net = 0; W.forEach(function (w) { sys += w.kpi.sys; abs += w.kpi.abs; net += w.kpi.net; });
-  var nat = sys ? (1 - abs / sys) * 100 : null, onT = W.filter(function (w) { return w.kpi.ira != null && Math.floor(w.kpi.ira * 100) / 100 >= TARGET; });
-  var isFinal = function (w) { return w.st === "done"; }, nFinal = W.filter(isFinal).length;
-  app.append(el("div", { class: "md-head" }, headBlock(t, false), f.box));
-  if (S.adm.meta && S.adm.meta.imported) app.append(el("div", { class: "banner", text: "Imported from the previous app's result Excel (" + (S.adm.meta.source || "") + "). Counts and system stock are as in that file; warehouse photos and signatures are only in the previous app." }));
-  if ((S.late || []).length) app.append(el("div", { class: "banner warn", text: (S.late || []).length + " count(s) arrived after closing and are not in these results yet. Take them in or ignore them on the Monthly page." }));
-  app.append(el("div", { class: "md-flow" },
-    el("div", { class: "done" }, el("i", { text: "✓" }), el("div", {}, el("b", { text: "Counting closed" }), el("small", { text: dhm(t.closedAt) + " · counts locked" }))),
-    el("div", { class: nFinal === W.length ? "done" : "now" }, el("i", { text: nFinal === W.length ? "✓" : "!" }), el("div", {}, el("b", { text: nFinal + " of " + W.length + " final" }), el("small", { text: nFinal === W.length ? "every sign-off is final" : (W.length - nFinal) + " sign-off(s) will say DRAFT" }))),
-    el("div", { class: "now" }, el("i", { text: "3" }), el("div", {}, el("b", { text: "Download the sign-offs" }), el("small", { text: "one ZIP with " + W.length + " PDFs, or one by one below" }))),
-    el("div", {}, el("i", { text: "4" }), el("div", {}, el("b", { text: "Get them signed" }), el("small", { text: "branch manager and Finance HQ sign each PDF" })))));
-  app.append(el("div", { class: "card" }, el("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
-    el("button", { class: "btn primary", text: "Download all sign-offs (ZIP)", onclick: function () { downloadAll(W.map(function (w) { return w.b; })); } }),
-    el("button", { class: "btn", text: "Export Excel", onclick: exportXlsx })),
-    el("div", { class: "md-tiles" },
-      tile("IRA by value (KPI002)", ira(nat), "Target " + TARGET + "% · " + (nat == null ? "" : Math.floor(nat * 100) / 100 >= TARGET ? "on target" : "below target"), nat != null && Math.floor(nat * 100) / 100 < TARGET ? "md-neg" : "md-pos"),
-      tile("System stock", "RM " + fmt(sys / 1e6, 2) + " M", W.reduce(function (a, w) { return a + w.nExp; }, 0) + " SKU lines at " + W.length + " warehouses"),
-      tile("Net difference", rm(net, true), "absolute RM " + fmt(Math.round(abs), 0), net < -0.5 ? "md-neg" : ""),
-      tile("Warehouses on target", onT.length + " / " + W.length, W.filter(function (w) { return onT.indexOf(w) < 0; }).map(function (w) { return w.b.replace(/^NDD /, ""); }).join(", ") || "all on target"))));
-  var box = el("div", { class: "md-rows" });
-  W.slice().sort(function (a, b) { return (a.kpi.ira == null ? 101 : a.kpi.ira) - (b.kpi.ira == null ? 101 : b.kpi.ira); }).forEach(function (w) {
-    var m = f.M[w.b] || {}, low = w.kpi.ira != null && Math.floor(w.kpi.ira * 100) / 100 < TARGET;
-    box.append(el("div", {}, el("div", { class: "g" }, el("b", { text: w.b }), el("small", { text: m.region || "" })),
-      el("div", { class: "nums" }, el("span", { class: low ? "md-neg" : "md-pos" }, el("em", { text: "IRA" }), ira(w.kpi.ira)),
-        el("span", { class: w.kpi.net < -0.5 ? "md-neg" : "" }, el("em", { text: "Net" }), rm(w.kpi.net, true)),
-        el("span", {}, el("em", { text: "SKUs off" }), String(w.over)),
-        el("span", { class: "pill " + (isFinal(w) ? "ok" : "warn"), text: isFinal(w) ? "Final" : "Draft · " + STAGE[w.st].short }),
-        el("button", { class: "btn", text: "PDF", "aria-label": "Sign-off PDF " + w.b, onclick: function () { signoffPdf(w.b); } }),
-        el("button", { class: "link", text: "Details", onclick: function () { S.mdWh = w.b; hooks.render(); window.scrollTo(0, 0); } }))));
+var RES = [["OK", "Exact", "var(--ok)"], ["WITHIN", "Within tolerance", "color-mix(in srgb, var(--ok) 45%, var(--card))"], ["OVER", "Over tolerance", "var(--bad)"],
+  ["NOT IN SYSTEM", "Not in SAP", "var(--info)"], ["NOT COUNTED", "Not counted", "color-mix(in srgb, var(--mute) 45%, var(--card))"], ["PENDING", "Pending", "var(--warn)"]];
+function resKey(f) { f = f || ""; return /^OVER/.test(f) ? "OVER" : /^WITHIN/.test(f) ? "WITHIN" : f; }
+function skuRes(w) { var c = {}, G = w.V.skuGroups || {}; Object.keys(G).forEach(function (k) { var r = resKey(G[k].flag); c[r] = (c[r] || 0) + 1; }); return c; }
+function onTarget(v) { return v != null && Math.floor(v * 100) / 100 >= TARGET; }
+function iraCls(v) { return v == null ? "" : onTarget(v) ? "md-pos" : v >= 99 ? "md-wn" : "md-neg"; }
+
+function resBar(c, h) {
+  var tot = 0; RES.forEach(function (r) { tot += c[r[0]] || 0; });
+  var bar = el("div", { class: "md-stack", style: "height:" + (h || 10) + "px", role: "img", "aria-label": RES.filter(function (r) { return c[r[0]]; }).map(function (r) { return c[r[0]] + " " + r[1]; }).join(", ") });
+  RES.forEach(function (r) { if (c[r[0]]) bar.append(el("i", { style: "flex:" + c[r[0]] + ";background:" + r[2], title: c[r[0]] + " " + r[1] })); });
+  return tot ? bar : el("div", { class: "md-stack", style: "height:" + (h || 10) + "px" });
+}
+function resKey2(c) {
+  return el("div", { class: "md-key" }, RES.filter(function (r) { return c[r[0]]; }).map(function (r) { return el("span", {}, el("em", { style: "background:" + r[2] + ";border:1px solid var(--line)" }), el("b", { text: String(c[r[0]]) }), r[1]); }));
+}
+
+/* IRA per warehouse: one bar each on 0-100 %, the target as a line; lowest first */
+function iraChart(W) {
+  var rows = W.slice().sort(function (a, b) { return (a.kpi.ira == null ? 101 : a.kpi.ira) - (b.kpi.ira == null ? 101 : b.kpi.ira); });
+  var box = el("div", { class: "md-ira" }), AX = 90;
+  box.append(el("div", { class: "md-irarow md-axis", "aria-hidden": "true" }, el("span"), el("span", { class: "tr" }, [90, 92, 94, 96, 98, 100].map(function (t) { return el("small", { style: "left:" + ((t - AX) / (100 - AX) * 100) + "%", text: t + "%" }); })), el("span")));
+  rows.forEach(function (w) {
+    var v = w.kpi.ira == null ? 0 : Math.max(0, w.kpi.ira), x = Math.max(0, Math.min(100, (v - AX) / (100 - AX) * 100)), col = onTarget(w.kpi.ira) ? "var(--ok)" : v >= 99 ? "var(--warn)" : "var(--bad)";
+    box.append(el("button", { class: "md-irarow", "aria-label": w.b + " IRA " + ira(w.kpi.ira), onclick: function () { S.mdWh = w.b; hooks.render(); window.scrollTo(0, 0); } },
+      el("span", { class: "nm", text: w.b.replace(/^NDD /, "") }),
+      el("span", { class: "tr" }, el("i", { style: "width:" + Math.max(x, 1.5) + "%;background:" + col }), el("u", { style: "left:" + ((TARGET - AX) / (100 - AX) * 100) + "%" }), v < AX ? el("small", { text: "below " + AX + "%" }) : null),
+      el("b", { class: iraCls(w.kpi.ira), text: ira(w.kpi.ira) })));
   });
-  app.append(el("div", { class: "card" }, el("h3", { style: "margin:0", text: "Sign-off per warehouse · lowest accuracy first" }),
-    el("p", { class: "small muted", style: "margin:2px 0 6px", text: "Each PDF has the counts, differences, photos, both teams' signatures and boxes for the branch manager and Finance HQ." }), box));
-  app.append(el("div", { class: "card" }, el("h3", { text: "Something still wrong?" }),
+  return el("div", { class: "card" }, el("h3", { style: "margin:0", text: "IRA by value per warehouse" }),
+    el("p", { class: "small muted", style: "margin:2px 0 10px", text: "Axis from 90% to 100% so small gaps show; the dark line is the " + TARGET + "% target. Tap a warehouse for its SKUs." }), box);
+}
+
+function finalCard(w, m) {
+  var c = skuRes(w), fin = w.st === "done", ppl = names(w.docs);
+  return el("button", { class: "md-wh", style: "border-left-color:" + (onTarget(w.kpi.ira) ? "var(--ok)" : (w.kpi.ira || 0) >= 99 ? "var(--warn)" : "var(--bad)"), "aria-label": w.b + " IRA " + ira(w.kpi.ira), onclick: function () { S.mdWh = w.b; hooks.render(); window.scrollTo(0, 0); } },
+    el("div", { class: "top" }, el("div", {}, el("div", { class: "nm", text: w.b }), el("div", { class: "small muted", text: [m && m.region, fmt(w.nExp) + " SKUs in SAP"].filter(Boolean).join(" · ") })),
+      el("span", { class: "pill " + (fin ? "ok" : "warn"), text: fin ? "Final" : "Draft · " + STAGE[w.st].short })),
+    el("div", { class: "md-big" }, el("b", { class: iraCls(w.kpi.ira), text: ira(w.kpi.ira) }), el("span", { class: "small muted", text: "IRA by value" })),
+    resBar(c, 10), resKey2(c),
+    el("div", { class: "md-res" }, el("span", {}, el("em", { class: "small muted", style: "font-style:normal", text: "Net " }), el("b", { class: w.kpi.net < -0.5 ? "md-neg" : "", text: rm(w.kpi.net, true) })),
+      el("span", {}, el("em", { class: "small muted", style: "font-style:normal", text: "Absolute " }), el("b", { text: rm(w.kpi.abs) }))),
+    el("div", { class: "md-foot" }, el("span", { text: ppl ? "Counted by " + ppl : "Nobody counted" }), el("span", { text: w.photos ? w.photos + " photos" : "" })));
+}
+
+/* SKUs with the biggest difference in RM (an uncounted SKU = all of it missing) */
+function finalDiffs(W) {
+  var rows = [];
+  W.forEach(function (w) {
+    var g = {};
+    w.V.forEach(function (o) { var a = g[o.code] || (g[o.code] = { code: o.code, desc: o.desc, b: w.b, s: 0, p: 0, sq: 0, pq: 0, cnt: false }); var c = o.cost || 0; a.s += (o.sys || 0) * c; a.sq += o.sys || 0; if (o.counted) { a.p += (o.phys || 0) * c; a.pq += o.phys || 0; a.cnt = true; } });
+    Object.keys(g).forEach(function (k) { var a = g[k]; a.rm = a.p - a.s; if (Math.abs(a.rm) >= 1) rows.push(a); });
+  });
+  rows.sort(function (x, y) { return Math.abs(y.rm) - Math.abs(x.rm); });
+  var box = el("div", { class: "md-rows" });
+  rows.slice(0, 12).forEach(function (a) {
+    box.append(el("div", {}, el("div", { class: "g" }, el("b", { text: a.code + " · " + a.desc }), el("small", { text: a.b })),
+      el("div", { class: "nums" }, el("span", {}, el("em", { text: "System" }), fmt(Math.round(a.sq))), el("span", {}, el("em", { text: "Counted" }), a.cnt ? fmt(Math.round(a.pq)) : "-"),
+        el("span", { class: a.rm < 0 ? "md-neg" : "" }, el("em", { text: "Diff" }), rm(a.rm, true)),
+        el("span", { class: "pill " + (!a.cnt ? "" : a.rm < 0 ? "bad" : "info"), text: !a.cnt ? "Not counted" : a.rm < 0 ? "Short" : "Excess" }))));
+  });
+  if (!rows.length) box.append(el("p", { class: "muted", text: "No differences." }));
+  return el("div", { class: "card" }, el("h3", { style: "margin:0", text: "Biggest differences" }),
+    el("p", { class: "small muted", style: "margin:2px 0 6px", text: "Top 12 SKUs by RM, all batches together. Excess = more found than SAP, Short = less." }), box);
+}
+
+/* things to check before signing: same batch keyed on two phones, warehouses nobody counted, late counts */
+function finalChecks(W) {
+  var items = [];
+  W.filter(function (w) { return !w.docs.length; }).forEach(function (w) { items.push(["bad", w.b + ": nobody counted", "Every SKU is a full shortage (" + rm(-w.kpi.sys) + "). Find out why before signing."]); });
+  /* the same SKU + batch counted on two or more phones with a quantity on each: the app adds them up */
+  var SK = skuMap(), pcs = function (l) { var k = SK[l.code] || {}; return (l.ctn || 0) * (k.per || 0) + (l.box || 0) * (k.perBox || 0) + (l.pcs || 0); };
+  W.forEach(function (w) {
+    var by = {}, cost = {}, extra = 0, n = 0, who = {};
+    w.V.forEach(function (x) { if (x.cost) cost[x.code] = x.cost; });
+    w.docs.forEach(function (d) { Object.keys(d.lines || {}).forEach(function (k) { var q = pcs(d.lines[k]); if (q > 0) (by[k] = by[k] || []).push([d, q]); }); });
+    Object.keys(by).forEach(function (k) {
+      if (by[k].length < 2) return;
+      var q = by[k].map(function (x) { return x[1]; }); n++;
+      extra += (q.reduce(function (a, b) { return a + b; }, 0) - Math.max.apply(null, q)) * (cost[k.split("|")[0]] || 0);
+      by[k].forEach(function (x) { who[x[0].member || "?"] = 1; });
+    });
+    if (n && extra >= 1) items.push([extra > 1000 ? "bad" : "warn", w.b + ": same batch counted by " + Object.keys(who).length + " people", n + " batch(es) have a count on more than one phone and were ADDED together (" + Object.keys(who).join(", ") + "). If they counted the same stock, up to " + rm(extra) + " is counted twice. Confirm with the warehouse which count is right."]);
+  });
+  (S.late || []).forEach(function (x) { items.push(["warn", x.branch + ": counts arrived after closing", x.lines + " line(s) not in these results yet - Monthly page"]); });
+  if (!items.length) return null;
+  var box = el("div", { class: "md-att" });
+  items.forEach(function (x) { box.append(el("div", {}, el("span", { class: "pill " + x[0], style: "min-width:58px;text-align:center", text: x[0] === "bad" ? "Act" : "Check" }), el("div", { class: "g" }, el("b", { text: x[1] }), el("small", { text: x[2] })))); });
+  return el("div", { class: "card", style: "border-color:var(--warn)" }, el("h3", { style: "margin:0 0 4px", text: "Check before signing · " + items.length }), box);
+}
+
+function renderFinal(app, t) {
+  var f = filters(), W = branches().filter(f.keep).map(whState), imported = S.adm.meta && S.adm.meta.imported;
+  var sys = 0, abs = 0, net = 0, cnt = 0, all = {}; W.forEach(function (w) { sys += w.kpi.sys; abs += w.kpi.abs; net += w.kpi.net; var c = skuRes(w); Object.keys(c).forEach(function (k) { all[k] = (all[k] || 0) + c[k]; }); });
+  cnt = sys + net;
+  var nat = sys ? (1 - abs / sys) * 100 : null, onT = W.filter(function (w) { return onTarget(w.kpi.ira); });
+  var nFinal = W.filter(function (w) { return w.st === "done"; }).length;
+  app.append(el("div", { class: "md-head" }, headBlock(t, false), el("div", { class: "md-filters" }, f.box,
+    el("button", { class: "btn primary", text: "Download all sign-offs (ZIP)", onclick: function () { downloadAll(W.map(function (w) { return w.b; })); } }),
+    el("button", { class: "btn", text: "Export Excel", onclick: exportXlsx }))));
+  if (imported) app.append(el("div", { class: "banner", text: "Imported from the previous app's result Excel (" + (S.adm.meta.source || "") + "). Counts and system stock are as in that file; warehouse photos and signatures are only in the previous app." }));
+  if ((S.late || []).length) app.append(el("div", { class: "banner warn", text: (S.late || []).length + " count(s) arrived after closing and are not in these results yet. Take them in or ignore them on the Monthly page." }));
+
+  /* headline */
+  app.append(el("div", { class: "card" },
+    el("div", { class: "md-hero" },
+      el("div", {}, el("span", { class: "small muted", text: "IRA by value (KPI002 rule)" }), el("b", { class: iraCls(nat), text: ira(nat) }),
+        el("span", { class: "small muted", text: "Target " + TARGET + "% · " + (onTarget(nat) ? "on target" : "below target") + " · " + onT.length + " of " + W.length + " warehouses on target" })),
+      el("div", { class: "md-tiles", style: "margin:0;flex:1" },
+        tile("System stock (SAP)", "RM " + fmt(sys / 1e6, 2) + " M", fmt(W.reduce(function (a, w) { return a + w.nExp; }, 0)) + " SKU lines · " + W.length + " warehouses"),
+        tile("Counted", "RM " + fmt(cnt / 1e6, 2) + " M", nFinal + " of " + W.length + " sign-offs final"),
+        tile("Net difference", rm(net, true), net < -0.5 ? "less found than SAP" : "more found than SAP", net < -0.5 ? "md-neg" : ""),
+        tile("Absolute difference", rm(abs), "plus and minus per SKU added up"))),
+    el("div", { style: "margin-top:14px" }, el("div", { class: "lb small", style: "display:flex;justify-content:space-between" }, el("b", { text: "SKU results, all warehouses" }), el("span", { class: "muted", text: Object.keys(all).reduce(function (a, k) { return a + all[k]; }, 0) + " SKUs" })), resBar(all, 14), resKey2(all))));
+
+  var ck = finalChecks(W); if (ck) app.append(ck);
+  app.append(iraChart(W));
+  var grid = el("div", { class: "md-grid" });
+  W.slice().sort(function (a, b) { return (a.kpi.ira == null ? 101 : a.kpi.ira) - (b.kpi.ira == null ? 101 : b.kpi.ira); }).forEach(function (w) { grid.append(finalCard(w, f.M[w.b])); });
+  app.append(el("div", { class: "card" }, el("h3", { style: "margin:0", text: "Warehouses · lowest accuracy first" }),
+    el("p", { class: "small muted", style: "margin:2px 0 10px", text: "Tap a warehouse for its SKUs, timeline and sign-off PDF." }), grid));
+  app.append(finalDiffs(W));
+  if (!imported) app.append(el("div", { class: "card" }, el("h3", { text: "Something still wrong?" }),
     el("p", { class: "small muted", text: "Reopen counting lets the warehouses change their counts again. Download the sign-offs again after closing." }),
     el("button", { class: "btn", text: "Reopen counting", onclick: function () {
       confirmBox("Reopen counting?", "Counters can change their counts again until you close it.", "Reopen", async function () { try { await rpc("admin_set_status", { p_token: tok(), p_status: "open" }); await loadAdmin(); hooks.render(); } catch (e) { msg("Can't reopen", errText(e)); } });
