@@ -89,7 +89,7 @@ function codesOf(list, exp) { var o = {}; list.forEach(function (d) { Object.key
 export function whState(b) {
   var docs = (S.counts || []).filter(function (d) { return d.branch === b; }), sg = isSingle();
   var ops = docs.filter(function (d) { return sessRole(d) === "ops"; }), fin = docs.filter(function (d) { return sessRole(d) === "fin"; });
-  var exp = {}, sysV = 0, sysQ = 0; (S.sysBy[b] || []).forEach(function (r) { exp[r[0]] = 1; sysV += r[2] * (r[3] || 0); sysQ += r[2]; });
+  var exp = {}, sysV = 0, sysQ = 0; (S.sysBy[b] || []).forEach(function (r) { if (r[2] > 0) exp[r[0]] = 1; sysV += r[2] * (r[3] || 0); sysQ += r[2]; });
   var nExp = Object.keys(exp).length, V = variance(b), lc = {}, net = 0, G = V.skuGroups || {};
   V.forEach(function (o) { if (o.status !== "NOT COUNTED") lc[o.status] = (lc[o.status] || 0) + 1; if (o.vv) net += o.vv; });
   var over = Object.keys(G).filter(function (c) { return /^OVER/.test(G[c].flag); }).length;
@@ -112,10 +112,11 @@ export function whState(b) {
 
 /* KPI002 rule (same as the server): per SKU |agreed value - system value|, an SKU nobody agreed on counts as not found */
 function kpiOf(V) {
-  var g = {}, sys = 0, abs = 0;
+  var g = {}, sys = 0, abs = 0, net = 0;
   V.forEach(function (o) { var a = g[o.code] || (g[o.code] = { s: 0, p: 0 }); var c = o.cost || 0; a.s += (o.sys || 0) * c; if (o.counted) a.p += (o.phys || 0) * c; });
-  Object.keys(g).forEach(function (c) { sys += g[c].s; abs += Math.abs(g[c].p - g[c].s); });
-  return { sys: sys, abs: abs, ira: sys ? (1 - abs / sys) * 100 : null };
+  Object.keys(g).forEach(function (c) { sys += g[c].s; abs += Math.abs(g[c].p - g[c].s); net += g[c].p - g[c].s; });
+  /* net = counted value less system value, an uncounted batch counting as 0 found (same as the Excel Summary) */
+  return { sys: sys, abs: abs, net: net, ira: sys ? (1 - abs / sys) * 100 : null };
 }
 
 function meta() {
@@ -141,6 +142,7 @@ export function renderDashTab(app) {
       el("button", { class: "btn primary", text: "Go to Monthly", onclick: function () { S.tab = "home"; hooks.render(); } })));
     return;
   }
+  if (S.viewTake && !S.mdWh) app.append(el("button", { class: "md-back", text: "← Back to the current stock take", onclick: function () { S.viewTake = null; S.adm = null; hooks.render(); } }));
   if (S.mdWh) return renderWarehouse(app, S.mdWh, t);
   if (t.status === "closed") return renderFinal(app, t);
   renderLive(app, t);
@@ -383,10 +385,11 @@ function renderWarehouse(app, b, t) {
 /* ---------- final (closed) ---------- */
 function renderFinal(app, t) {
   var f = filters(), W = branches().filter(f.keep).map(whState);
-  var sys = 0, abs = 0, net = 0; W.forEach(function (w) { sys += w.kpi.sys; abs += w.kpi.abs; net += w.net; });
+  var sys = 0, abs = 0, net = 0; W.forEach(function (w) { sys += w.kpi.sys; abs += w.kpi.abs; net += w.kpi.net; });
   var nat = sys ? (1 - abs / sys) * 100 : null, onT = W.filter(function (w) { return w.kpi.ira != null && Math.floor(w.kpi.ira * 100) / 100 >= TARGET; });
   var isFinal = function (w) { return w.st === "done"; }, nFinal = W.filter(isFinal).length;
   app.append(el("div", { class: "md-head" }, headBlock(t, false), f.box));
+  if (S.adm.meta && S.adm.meta.imported) app.append(el("div", { class: "banner", text: "Imported from the previous app's result Excel (" + (S.adm.meta.source || "") + "). Counts and system stock are as in that file; warehouse photos and signatures are only in the previous app." }));
   if ((S.late || []).length) app.append(el("div", { class: "banner warn", text: (S.late || []).length + " count(s) arrived after closing and are not in these results yet. Take them in or ignore them on the Monthly page." }));
   app.append(el("div", { class: "md-flow" },
     el("div", { class: "done" }, el("i", { text: "✓" }), el("div", {}, el("b", { text: "Counting closed" }), el("small", { text: dhm(t.closedAt) + " · counts locked" }))),
@@ -406,7 +409,7 @@ function renderFinal(app, t) {
     var m = f.M[w.b] || {}, low = w.kpi.ira != null && Math.floor(w.kpi.ira * 100) / 100 < TARGET;
     box.append(el("div", {}, el("div", { class: "g" }, el("b", { text: w.b }), el("small", { text: m.region || "" })),
       el("div", { class: "nums" }, el("span", { class: low ? "md-neg" : "md-pos" }, el("em", { text: "IRA" }), ira(w.kpi.ira)),
-        el("span", { class: w.net < -0.5 ? "md-neg" : "" }, el("em", { text: "Net" }), rm(w.net, true)),
+        el("span", { class: w.kpi.net < -0.5 ? "md-neg" : "" }, el("em", { text: "Net" }), rm(w.kpi.net, true)),
         el("span", {}, el("em", { text: "SKUs off" }), String(w.over)),
         el("span", { class: "pill " + (isFinal(w) ? "ok" : "warn"), text: isFinal(w) ? "Final" : "Draft · " + STAGE[w.st].short }),
         el("button", { class: "btn", text: "PDF", "aria-label": "Sign-off PDF " + w.b, onclick: function () { signoffPdf(w.b); } }),

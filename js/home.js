@@ -301,6 +301,7 @@ function renderHistory(app) {
     t.append(el("tr", {}, el("td", { text: x.name }), el("td", { text: (x.scope === "partial" ? "Partial (" + x.skuCount + ")" : "Total") + (x.mode === "single" ? " · Single" : " · Double") }), el("td", {}, stateTag(x.status)),
       el("td", { text: tsTxt(x.openedAt) }), el("td", { text: tsTxt(x.closedAt) }),
       el("td", { class: "row", style: "gap:10px;flex-wrap:nowrap" }, el("button", { class: "link", text: "View (read-only)", onclick: async function () { try { S.viewTake = x.id; await loadAdmin(); S.tab = "master"; hooks.render(); window.scrollTo(0, 0); } catch (e) { S.viewTake = null; msg("Can't load", errText(e)); } } }),
+        x.status === "closed" ? el("button", { class: "link", text: "Results", onclick: async function () { try { S.viewTake = x.id; await loadAdmin(); S.tab = "dash"; S.dashView = "monthly"; S.mdWh = null; hooks.render(); window.scrollTo(0, 0); } catch (e) { msg("Can't open", errText(e)); } } }) : null,
         isOwner() && x.status !== "open" ? el("button", { class: "link", style: "color:var(--bad)", text: "Delete", onclick: function () { deleteTake(x); } }) : null)));
   });
   app.append(el("div", { class: "card", style: "margin-top:18px" }, el("h3", { text: "History" }), el("div", { class: "tw" }, t)));

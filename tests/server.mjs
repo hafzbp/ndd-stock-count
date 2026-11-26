@@ -111,5 +111,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   await setup();
   if (process.env.BOOTSTRAP_CODE) await db.query(`insert into private.secrets (key, value, expires_at) values ('bootstrap_code', extensions.crypt($1, extensions.gen_salt('bf')), now() + interval '7 days')`, [process.env.BOOTSTRAP_CODE]);
   if (process.env.SEED_BRANCHES) for (const b of process.env.SEED_BRANCHES.split(",")) await db.query(`insert into public.branches (name, pin) values ($1, private.new_pin())`, [b]);
+  if (process.env.EXTRA_SQL) for (const f of process.env.EXTRA_SQL.split(",")) await db.exec(fs.readFileSync(f, "utf8"));
   serve(); console.log("ready on http://localhost:" + PORT + "/?api=local");
 }

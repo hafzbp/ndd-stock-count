@@ -174,6 +174,7 @@ export async function signoffPdf(b, quiet) {
   d.setFont("helvetica", "normal"); d.setFontSize(9);
   var subs = ses.map(function (x) { return x.submittedAt || ""; }).filter(Boolean).sort();
   d.text("Count submitted: " + (subs.length ? tsTxt(subs[0]) + (subs.length > 1 ? " to " + tsTxt(subs[subs.length - 1]) : "") : "-") + "     Generated: " + tsTxt(nowIso()), 14, y); y += 5;
+  if (S.adm && S.adm.meta && S.adm.meta.imported) { d.setTextColor(150, 80, 0); d.text("Imported from the previous app's result Excel - signatures and photos are on the original sign-off.", 14, y); d.setTextColor(0); y += 5; }
   if (!final) { d.setTextColor(200, 0, 0); d.setFont("helvetica", "bold"); d.text("DRAFT - not final: " + (!allSub ? "not all counts submitted. " : "") + (open ? open + " line(s) still RECOUNT / WAITING." : ""), 14, y); d.setTextColor(0); d.setFont("helvetica", "normal"); y += 5; }
   if (tk.scope === "partial") { d.setFont("helvetica", "bold"); d.text("Partial count: " + tk.skuCount + " picked SKU(s) only.", 14, y); d.setFont("helvetica", "normal"); y += 5; }
   d.text("Quantities in PCS. " + (sg ? "Single count: one team counted; its count is the agreed count." : "Double count: Operations and Finance counted separately; only MATCH lines are agreed.") + (tk.stockType === "bad" ? " System = SAP MB52 bad-stock locations BS00, BS01, SH00 only (good and blocked stock excluded)." : " System = SAP MB52 good stock (bad/blocked excluded).") + " Tolerance ±" + tolPct() + "% per SKU.", 14, y, { maxWidth: W - 28 }); y += 9;
