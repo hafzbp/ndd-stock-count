@@ -621,5 +621,25 @@ await t("bad settings rejected", async () => {
   await db.query("delete from public.settings where key = 'test_today'");
 });
 
+await t("import a result Excel from the previous app as a closed stock take", async () => {
+  const P = { name: "Imported test", opened: "2026-11-25T08:06:00+08:00", closed: "2026-11-25T15:00:00+08:00", loaded: "2026-11-25T08:06:00+08:00", source: "x.xlsx",
+    meta: { imported: true, goodV: 10 }, skus: [{ code: "ZZ9", desc: "New SKU", per: 10, box: null }],
+    sys: [{ b: "NDD Alpha", c: "A1", bt: "2027-01", q: 100, u: 0.5 }, { b: "NDD Gone", c: "A1", bt: "2027-01", q: 5, u: 0.5 }],
+    sessions: [{ branch: "NDD Alpha", member: "Ana", device: "import-1", start: "2026-11-25T09:00:00+08:00", end: "2026-11-25T10:00:00+08:00",
+      lines: { "A1|2027-01": { code: "A1", batch: "2027-01", ctn: 9, box: null, pcs: 4, per: 999, perBox: null, total: 98, remark: "", t: null },
+               "ZZ9|": { code: "ZZ9", batch: "", ctn: 1, box: null, pcs: 0, per: 10, perBox: null, total: 10, remark: "", t: null } } },
+      { branch: "NDD Gone", member: "X", device: "import-2", start: "2026-11-25T09:00:00+08:00", end: "2026-11-25T09:00:00+08:00", lines: {} }] };
+  const ADM2 = (await db.query("select token from public.tokens where kind in ('owner', 'finance') and expires_at > now() order by expires_at desc limit 1")).rows[0].token;
+  await rejects(rpc("admin_import_take", { p_token: TA, p_payload: P }), /./);
+  const r = await rpc("admin_import_take", { p_token: ADM2, p_payload: P });
+  assert.equal(r.ok, true); assert.deepEqual(r.skipped, ["NDD Gone"]);
+  const a = await rpc("admin_load", { p_token: ADM2, p_take: r.take });
+  assert.equal(a.takeInfo.status, "closed"); assert.equal(a.takeInfo.mode, "single");
+  const s = a.sessions.find((x) => x.branch === "NDD Alpha"); assert.equal(s.status, "submitted");
+  assert.equal(s.data.lines["A1|2027-01"].pcs, 98); assert.equal(s.data.lines["A1|2027-01"].ctn, null);   // pack size differs from the app's: total pieces kept
+  assert.equal(s.data.lines["ZZ9|"].ctn, 1);                                                                // same pack size: cartons kept
+  await rejects(rpc("admin_import_take", { p_token: ADM2, p_payload: P }), /Already imported/);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

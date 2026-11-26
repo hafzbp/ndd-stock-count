@@ -295,7 +295,8 @@ function renderClosed(app, t) {
 /* ---------------- History ---------------- */
 function renderHistory(app) {
   var cur = S.adm.current, past = (S.adm.takes || []).filter(function (x) { return x.id !== cur; });
-  if (!past.length) return;
+  var imp = el("button", { class: "link", text: "Import a result from the previous app…", onclick: function () { import("./importprev.js").then(function (m) { m.importPrevDialog(); }); } });
+  if (!past.length) { app.append(el("div", { class: "card", style: "margin-top:18px" }, el("h3", { text: "History" }), el("p", { class: "muted small", text: "No earlier stock takes." }), imp)); return; }
   var t = el("table", {}, el("tr", {}, ["Stock take", "Type", "Status", "Opened", "Closed", ""].map(function (h) { return el("th", { text: h }); })));
   past.forEach(function (x) {
     t.append(el("tr", {}, el("td", { text: x.name }), el("td", { text: (x.scope === "partial" ? "Partial (" + x.skuCount + ")" : "Total") + (x.mode === "single" ? " · Single" : " · Double") }), el("td", {}, stateTag(x.status)),
@@ -304,7 +305,7 @@ function renderHistory(app) {
         x.status === "closed" ? el("button", { class: "link", text: "Results", onclick: async function () { try { S.viewTake = x.id; await loadAdmin(); S.tab = "dash"; S.dashView = "monthly"; S.mdWh = null; hooks.render(); window.scrollTo(0, 0); } catch (e) { msg("Can't open", errText(e)); } } }) : null,
         isOwner() && x.status !== "open" ? el("button", { class: "link", style: "color:var(--bad)", text: "Delete", onclick: function () { deleteTake(x); } }) : null)));
   });
-  app.append(el("div", { class: "card", style: "margin-top:18px" }, el("h3", { text: "History" }), el("div", { class: "tw" }, t)));
+  app.append(el("div", { class: "card", style: "margin-top:18px" }, el("h3", { text: "History" }), el("div", { class: "tw" }, t), el("p", { style: "margin:10px 0 0" }, imp)));
 }
 
 /* Owner: delete a closed (or never opened) stock take with its counts, results and photos. */
