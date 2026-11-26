@@ -260,7 +260,7 @@ function renderOpen(app, t) {
         el("button", { class: "btn", style: "color:var(--bad)", text: "Close counting", onclick: function () {
           var open = rows.filter(function (r) { return !done(r); }).map(function (r) { return r.b; });
           confirmBox("Close counting?", (open.length ? "Not everyone has submitted yet: " + open.join(", ") + ".\n\n" : "") + "Counters can't change anything after this. A phone that is offline right now keeps its unsent counts; they come back here as 'counts that arrived after closing' for you to take in or ignore. Results, Excel, sign-off PDFs and the dashboard variance use what is saved now. You can reopen later.", "Close", async function () {
-            try { await rpc("admin_set_status", { p_token: tok(), p_status: "closed" }); await loadAdmin(); hooks.render(); window.scrollTo(0, 0); } catch (e) { msg("Can't close", errText(e)); }
+            try { await rpc("admin_set_status", { p_token: tok(), p_status: "closed" }); await loadAdmin(); import("./mdash.js").then(function (m) { m.saveResults(); }); hooks.render(); window.scrollTo(0, 0); } catch (e) { msg("Can't close", errText(e)); }
           });
         } }))));
 }
@@ -320,7 +320,7 @@ function deleteTake(x) {
           if (inp.value.trim() !== x.name) { err.textContent = "Type the name exactly: " + x.name; return; }
           try {
             var r = await rpc("owner_delete_take", { p_token: S.admin.token, p_take: x.id });
-            if (r.paths && r.paths.length) { try { await fn("photos", { action: "remove_paths", token: S.admin.token, paths: r.paths }); } catch (e) { } }
+            if (r.paths && r.paths.length) { try { await fn("photos", { action: "remove_paths", token: S.admin.token, paths: r.paths }); } catch (e) { } } try { await fn("photos", { action: "signed_purge", token: S.admin.token, take_id: x.id }); } catch (e) { }
             closeModal(); S.viewTake = null; S.wiz = null; S.wizNew = false; await loadAdmin(); hooks.render(); toast("“" + r.name + "” deleted");
           } catch (e) { err.textContent = errText(e); }
         } })));

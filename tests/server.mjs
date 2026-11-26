@@ -80,6 +80,23 @@ async function photos(body) {
       files.delete(p.path); await q(`delete from public.session_photos where id = $1`, [p.id]); return [200, { ok: true }];
     }
     if (body.action === "remove_paths") { if (tok.kind !== "owner" && tok.kind !== "finance") return [403, { error: "AUTH: admin login needed" }]; (body.paths || []).forEach((p) => files.delete(p)); return [200, { ok: true }]; }
+    if (String(body.action || "").startsWith("signed_")) {
+      if (!admin) return [403, { error: "AUTH: admin login needed" }];
+      const takeId = String(body.take_id || ""); const [tk] = await q(`select id, status from public.stock_takes where id::text = $1`, [takeId]);
+      if (body.action === "signed_purge") { if (tk) return [400, { error: "Stock take still exists" }]; let n = 0; for (const k of [...files.keys()]) if (k.startsWith("signoffs/" + takeId + "/")) { files.delete(k); n++; } return [200, { ok: true, removed: n }]; }
+      if (!tk) return [400, { error: "GONE: this stock take was deleted." }];
+      if (body.action === "signed_list") { const rows = await q(`select branch, path, file_name, size, uploaded_at, uploaded_by from public.signed_copies where take_id = $1 order by branch`, [takeId]); return [200, { copies: rows.map((r) => ({ branch: r.branch, name: r.file_name, size: Number(r.size), at: r.uploaded_at, by: r.uploaded_by, url: "/storage-test/get/" + r.path })) }]; }
+      const [br] = await q(`select name from public.branches where name = $1`, [String(body.branch || "")]);
+      if (!br) return [400, { error: "Unknown warehouse: " + body.branch }];
+      if (body.action === "signed_upload") { const size = Number(body.size || 0); if (!(size > 100) || size > 50 * 1024 * 1024) return [400, { error: "PDF is empty or bigger than 50 MB." }]; const path = `${takeId}/${br.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}/${crypto.randomUUID()}.pdf`; return [200, { path, url: "/storage-test/put/" + path + "?token=t" }]; }
+      if (body.action === "signed_commit") {
+        const path = String(body.path || ""); if (!files.has("signoffs/" + path)) return [400, { error: "The upload didn't arrive. Try again." }];
+        const [old] = await q(`select path from public.signed_copies where take_id = $1 and branch = $2`, [takeId, br.name]);
+        await q(`insert into public.signed_copies (take_id, branch, path, file_name, size, uploaded_by) values ($1, $2, $3, $4, $5, $6) on conflict (take_id, branch) do update set path = excluded.path, file_name = excluded.file_name, size = excluded.size, uploaded_at = now(), uploaded_by = excluded.uploaded_by`, [takeId, br.name, path, String(body.name || "signed.pdf"), files.get("signoffs/" + path).length, tok.kind]);
+        if (old && old.path !== path) files.delete("signoffs/" + old.path); return [200, { ok: true }];
+      }
+      if (body.action === "signed_delete") { const [old] = await q(`select path from public.signed_copies where take_id = $1 and branch = $2`, [takeId, br.name]); if (old) { files.delete("signoffs/" + old.path); await q(`delete from public.signed_copies where take_id = $1 and branch = $2`, [takeId, br.name]); } return [200, { ok: true }]; }
+    }
     return [400, { error: "Unknown action" }];
   } catch (e) { return [/^AUTH/.test(e.message) ? 403 : 400, { error: e.message }]; }
 }
@@ -99,6 +116,14 @@ export function serve() {
       catch (e) { res.writeHead(e.status || (/AUTH|LOCKED/.test(e.message) ? 403 : 400)); res.end(JSON.stringify({ message: e.message, code: e.code })); }
       return;
     }
+    /* fake storage for signed sign-off copies: PUT /storage-test/put/<path>, GET /storage-test/get/<path> */
+    if (u.pathname.startsWith("/storage-test/put/") && (req.method === "PUT" || req.method === "POST")) {
+      const ch = []; for await (const c of req) ch.push(c); let buf = Buffer.concat(ch);
+      if (/multipart/.test(req.headers["content-type"] || "")) { const a = buf.indexOf("%PDF"), z = buf.lastIndexOf("\r\n--"); buf = a >= 0 && z > a ? buf.slice(a, z) : Buffer.alloc(0); }
+      if (buf.length > 50 * 1024 * 1024 || buf.slice(0, 4).toString() !== "%PDF") { res.writeHead(400); res.end(JSON.stringify({ message: "not a pdf" })); return; }
+      files.set("signoffs/" + decodeURIComponent(u.pathname.slice(18)), buf); res.writeHead(200); res.end(JSON.stringify({ Key: u.pathname })); return;
+    }
+    if (u.pathname.startsWith("/storage-test/get/")) { const b = files.get("signoffs/" + decodeURIComponent(u.pathname.slice(18))); if (!b) { res.writeHead(404); res.end(); return; } res.writeHead(200, { "Content-Type": "application/pdf" }); res.end(b); return; }
     let p = path.join(ROOT, decodeURIComponent(u.pathname)); if (!p.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
     if (fs.existsSync(p) && fs.statSync(p).isDirectory()) p = path.join(p, "index.html");
     if (!fs.existsSync(p)) { res.writeHead(404); res.end("not found"); return; }

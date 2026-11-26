@@ -90,6 +90,60 @@ Deno.serve(async (req) => {
       return json({ ok: true, removed: paths.length });
     }
 
+    // ---- signed sign-off copies (admin only): private "signoffs" bucket, path = take id / branch slug / random.pdf
+    if (action.startsWith("signed_")) {
+      if (!admin) return json({ error: "AUTH: admin login needed" }, 403);
+      const SB = "signoffs", takeId = String(body.take_id || "");
+      if (!/^[0-9a-f-]{36}$/.test(takeId)) return json({ error: "Bad stock take" }, 400);
+      const { data: tk } = await db.from("stock_takes").select("id, status").eq("id", takeId).maybeSingle();
+      if (action === "signed_purge") {           // the stock take was deleted: remove its files
+        if (tk) return json({ error: "Stock take still exists" }, 400);
+        const { data: dirs } = await db.storage.from(SB).list(takeId, { limit: 1000 });
+        const paths: string[] = [];
+        for (const d of dirs || []) { const { data: fs } = await db.storage.from(SB).list(takeId + "/" + d.name, { limit: 1000 }); (fs || []).forEach((f) => paths.push(takeId + "/" + d.name + "/" + f.name)); }
+        if (paths.length) await db.storage.from(SB).remove(paths);
+        return json({ ok: true, removed: paths.length });
+      }
+      if (!tk) return json({ error: "GONE: this stock take was deleted." }, 400);
+      if (action === "signed_list") {
+        const { data: rows } = await db.from("signed_copies").select("branch, path, file_name, size, uploaded_at, uploaded_by").eq("take_id", takeId).order("branch");
+        if (!rows || !rows.length) return json({ copies: [] });
+        const { data: urls, error } = await db.storage.from(SB).createSignedUrls(rows.map((r) => r.path), 3600, body.download ? { download: true } : undefined);
+        if (error) throw error;
+        return json({ copies: rows.map((r, i) => ({ branch: r.branch, name: r.file_name, size: r.size, at: r.uploaded_at, by: r.uploaded_by, url: urls![i].signedUrl })) });
+      }
+      const branch = String(body.branch || "");
+      const { data: br } = await db.from("branches").select("name").eq("name", branch).maybeSingle();
+      if (!br) return json({ error: "Unknown warehouse: " + branch }, 400);
+      if (action === "signed_upload") {         // step 1: a one-time upload URL; the browser PUTs the PDF straight to storage
+        const size = Number(body.size || 0);
+        if (!(size > 100) || size > 50 * 1024 * 1024) return json({ error: "PDF is empty or bigger than 50 MB." }, 400);
+        const path = `${takeId}/${branch.toLowerCase().replace(/[^a-z0-9]+/g, "-")}/${crypto.randomUUID()}.pdf`;
+        const { data, error } = await db.storage.from(SB).createSignedUploadUrl(path);
+        if (error) throw error;
+        return json({ path, url: data.signedUrl });
+      }
+      if (action === "signed_commit") {         // step 2: record it (replaces the warehouse's earlier copy)
+        const path = String(body.path || "");
+        if (!path.startsWith(takeId + "/") || !/\.pdf$/.test(path)) return json({ error: "Bad path" }, 400);
+        const dir = path.slice(0, path.lastIndexOf("/")), fname = path.slice(path.lastIndexOf("/") + 1);
+        const { data: fs } = await db.storage.from(SB).list(dir, { search: fname });
+        const f = (fs || []).find((x) => x.name === fname);
+        if (!f) return json({ error: "The upload didn't arrive. Try again." }, 400);
+        const { data: old } = await db.from("signed_copies").select("path").eq("take_id", takeId).eq("branch", branch).maybeSingle();
+        const name = String(body.name || "signed.pdf").slice(0, 200);
+        const { error } = await db.from("signed_copies").upsert({ take_id: takeId, branch, path, file_name: name, size: Number(f.metadata?.size || body.size || 0), uploaded_at: new Date().toISOString(), uploaded_by: tok.kind });
+        if (error) throw error;
+        if (old && old.path !== path) await db.storage.from(SB).remove([old.path]);
+        return json({ ok: true });
+      }
+      if (action === "signed_delete") {
+        const { data: old } = await db.from("signed_copies").select("path").eq("take_id", takeId).eq("branch", branch).maybeSingle();
+        if (old) { await db.storage.from(SB).remove([old.path]); await db.from("signed_copies").delete().eq("take_id", takeId).eq("branch", branch); }
+        return json({ ok: true });
+      }
+    }
+
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
