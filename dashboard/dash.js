@@ -14,7 +14,20 @@ function bar(label, done, total, color) {
 }
 function kpi(v, l, cls) { return el("div", { class: "kpi" }, el("b", { class: cls || "", text: v }), el("span", { text: l })); }
 
+/* tabs: Daily & KPI | Monthly stock take. #monthly / #daily in the link, else the last one picked, else Monthly while counting is open */
+var PICKED = /^#(daily|monthly)$/.test(location.hash) ? location.hash.slice(1) : (function () { try { return localStorage.getItem("ndd2-dtab"); } catch (e) { return null; } })();
+function setTab(t, keep) {
+  if (keep) PICKED = t; document.body.setAttribute("data-tab", t);
+  document.querySelectorAll("#dtabs button").forEach(function (b) { var on = b.getAttribute("data-t") === t; b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false"); });
+  if (keep) { try { localStorage.setItem("ndd2-dtab", t); } catch (e) { } history.replaceState(null, "", "#" + t); window.scrollTo(0, 0); }
+}
+document.querySelectorAll("#dtabs button").forEach(function (b) { b.addEventListener("click", function () { setTab(b.getAttribute("data-t"), true); }); });
+setTab(PICKED || "daily");
+function liveDot(on) { var b = document.querySelector("#dtabs button[data-t=monthly]"); if (!b) return; var i = b.querySelector("i"); if (on && !i) b.append(el("i", { title: "Counting now" })); if (!on && i) i.remove(); }
+
 function draw(d) {
+  if (!PICKED && !draw.once) setTab(d.status === "open" ? "monthly" : "daily"); draw.once = 1;
+  liveDot(d.status === "open");
   document.title = (d.title || "Stock Count") + " · Dashboard";
   $("#title").textContent = (d.title || "Stock Count") + " · Live dashboard";
   $("#sub").textContent = "Daily cycle count and monthly stock take · updated " + tsTxt(d.generatedAt);
@@ -144,7 +157,7 @@ function prPicker() {
   var sel = el("select", { id: "pr-take", "aria-label": "Monthly results to show", onchange: function (e) { pr.sel = e.target.value; pr.ask = false; pr.err = ""; showMonthly(); } },
     el("option", { value: "", text: "Live · " + (pr.live || "current stock take") }),
     pr.list.map(function (x) { return el("option", { value: x.id, selected: pr.sel === x.id, text: "Results · " + x.name + " · closed " + prDate(x.closedAt) + (x.imported && !/previous app/i.test(x.name) ? " (previous app)" : "") }); }));
-  return el("div", { class: "pr-pick" }, el("label", { for: "pr-take", text: "Monthly stock take" }), sel);
+  return el("div", { class: "pr-pick" }, el("label", { for: "pr-take", text: "Showing" }), sel);
 }
 async function prFetch(id) {
   var args = { p_take: id };
