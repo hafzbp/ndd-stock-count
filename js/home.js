@@ -252,7 +252,7 @@ function renderOpen(app, t) {
     el("div", { class: "card" }, el("h3", { text: "Progress" }), progressTable()),
     el("div", { class: "card" }, el("h3", { text: "Next" }),
       el("div", { class: "row" },
-        el("button", { class: "btn primary", text: "Live dashboard", onclick: function () { S.tab = "dash"; S.dashView = "monthly"; S.mdWh = null; hooks.render(); window.scrollTo(0, 0); } }),
+        el("button", { class: "btn primary", text: "Live dashboard", onclick: function () { S.tab = "dash"; S.dashView = "monthly"; S.mdWh = null; S.viewTake = null; S.mdAuto = 1; hooks.render(); window.scrollTo(0, 0); } }),
         el("button", { class: "btn", text: "Check results and recounts", onclick: function () { S.tab = "master"; hooks.render(); window.scrollTo(0, 0); } }),
         el("button", { class: "btn", text: "Message for warehouses", onclick: function () { openModal(function (sh) { sh.append(el("h3", { text: "Message for the warehouses" }), messageBox(), el("button", { class: "btn block", style: "margin-top:10px", text: "Close", onclick: closeModal })); }); } }),
         el("button", { class: "btn", text: "Replace MB52", onclick: function () { openModal(function (sh) { sh.append(mb52Card("Replace the MB52", function () { closeModal(); hooks.render(); }), el("button", { class: "btn block", text: "Cancel", onclick: closeModal })); }); } }),
@@ -282,7 +282,7 @@ function renderClosed(app, t) {
     el("div", { class: "card" }, el("h3", { text: "Results" }), el("div", { class: "tw" }, tbl)),
     el("div", { class: "card" }, el("h3", { text: "Next" }),
       el("div", { class: "row" },
-        el("button", { class: "btn primary", text: "Final results & all sign-offs", onclick: function () { S.tab = "dash"; S.dashView = "monthly"; S.mdWh = null; hooks.render(); window.scrollTo(0, 0); } }),
+        el("button", { class: "btn primary", text: "Final results & all sign-offs", onclick: function () { S.tab = "dash"; S.dashView = "monthly"; S.mdWh = null; S.viewTake = null; S.mdAuto = 1; hooks.render(); window.scrollTo(0, 0); } }),
         el("button", { class: "btn", text: "Export to Excel", onclick: exportXlsx }),
         el("button", { class: "btn", text: "Sign-off PDF per warehouse", onclick: function () { S.tab = "master"; hooks.render(); window.scrollTo(0, 0); } }),
         el("button", { class: "btn", text: "Reopen counting", onclick: function () {

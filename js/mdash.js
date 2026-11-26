@@ -15,6 +15,7 @@ import { deleteCountsModal } from "./hqreset.js";
 import { overlaps } from "./home.js";
 import { renderDash } from "./hqdash.js";
 import { signedFor, signedDialog, signedBlob, refreshSigned } from "./signed.js";
+import { topSkusCard, shortExcessCard } from "./mres.js";
 
 var TARGET = 99.95, IDLE_MIN = 30;
 function tok() { return S.admin.token; }
@@ -149,6 +150,16 @@ export function renderDashTab(app) {
     })));
   if (S.dashView === "daily") return renderDash(app);
   if (!S.adm) { app.append(el("p", { class: "muted", text: "Loading…" })); loadAdmin().then(hooks.render); return; }
+  /* open on the latest closed results, unless a monthly count is really running (a warehouse has keyed a quantity) */
+  if (!S.viewTake && !S.mdPicked && !S.mdAuto) {
+    S.mdAuto = 1;
+    var real = t.status === "open" && (S.counts || []).some(function (d) { return Object.keys(d.lines || {}).some(function (k) { return hasQty(d.lines[k]); }); });
+    var lastC = (S.adm.takes || []).filter(function (x) { return x.status === "closed" && x.id !== S.adm.current; }).sort(function (a, b) { return new Date(b.closedAt || 0) - new Date(a.closedAt || 0); })[0];
+    if (!real && t.status !== "closed" && lastC) {
+      S.viewTake = lastC.id; S.mdView = true; S.adm = null; app.append(el("p", { class: "center muted", text: "Loading…" }));
+      loadAdmin().then(hooks.render, function (e) { S.viewTake = null; msg("Can't load", errText(e)); hooks.render(); }); return;
+    }
+  }
   var pk = takePicker(); if (pk) app.append(pk);
   if (!t.id || t.status === "draft" || !t.openedAt) {
     app.append(el("div", { class: "card" }, el("h3", { text: "No monthly stock take running" }),
@@ -168,8 +179,8 @@ function takePicker() {
   var on = S.viewTake || cur;
   var lab = function (x) { var d = x.closedAt || x.openedAt; return (x.id === cur ? "Current · " : "") + x.name + (x.status === "closed" ? " · closed " + (d ? new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "") : x.status === "open" ? " · counting now" : " · not started"); };
   var sel = el("select", { id: "md-take", "aria-label": "Stock take to show", onchange: async function (e) {
-    var v = e.target.value; S.mdWh = null;
-    try { S.viewTake = v === cur ? null : v; S.adm = null; app0(); await loadAdmin(); hooks.render(); window.scrollTo(0, 0); } catch (er) { msg("Can't load", errText(er)); }
+    var v = e.target.value; S.mdWh = null; S.mdPicked = true;
+    try { S.viewTake = v === cur ? null : v; S.mdView = !!S.viewTake; S.adm = null; app0(); await loadAdmin(); hooks.render(); window.scrollTo(0, 0); } catch (er) { msg("Can't load", errText(er)); }
   } }, L.map(function (x) { return el("option", { value: x.id, text: lab(x), selected: x.id === on }); }));
   return el("div", { class: "md-pick" }, el("label", { for: "md-take", text: "Showing" }), sel);
 }
@@ -457,29 +468,15 @@ function finalCard(w, m, sgn) {
 }
 
 /* SKUs with the biggest difference in RM (an uncounted SKU = all of it missing) */
-function diffRows(W) {
+function skuRows(W) {
   var rows = [];
   W.forEach(function (w) {
     var g = {};
     w.V.forEach(function (o) { var a = g[o.code] || (g[o.code] = { code: o.code, desc: o.desc, b: w.b, s: 0, p: 0, sq: 0, pq: 0, cnt: false }); var c = o.cost || 0; a.s += (o.sys || 0) * c; a.sq += o.sys || 0; if (o.counted) { a.p += (o.phys || 0) * c; a.pq += o.phys || 0; a.cnt = true; } });
-    Object.keys(g).forEach(function (k) { var a = g[k]; a.rm = a.p - a.s; if (Math.abs(a.rm) >= 1) rows.push(a); });
+    Object.keys(g).forEach(function (k) { var a = g[k]; a.rm = a.p - a.s; rows.push(a); });
   });
-  rows.sort(function (x, y) { return Math.abs(y.rm) - Math.abs(x.rm); });
   return rows;
 }
-function finalDiffs(W) {
-  var rows = diffRows(W), box = el("div", { class: "md-rows" });
-  rows.slice(0, 12).forEach(function (a) {
-    box.append(el("div", {}, el("div", { class: "g" }, el("b", { text: a.code + " · " + a.desc }), el("small", { text: a.b })),
-      el("div", { class: "nums" }, el("span", {}, el("em", { text: "System" }), fmt(Math.round(a.sq))), el("span", {}, el("em", { text: "Counted" }), a.cnt ? fmt(Math.round(a.pq)) : "-"),
-        el("span", { class: a.rm < 0 ? "md-neg" : "" }, el("em", { text: "Diff" }), rm(a.rm, true)),
-        el("span", { class: "pill " + (!a.cnt ? "" : a.rm < 0 ? "bad" : "info"), text: !a.cnt ? "Not counted" : a.rm < 0 ? "Short" : "Excess" }))));
-  });
-  if (!rows.length) box.append(el("p", { class: "muted", text: "No differences." }));
-  return el("div", { class: "card" }, el("h3", { style: "margin:0", text: "Biggest differences" }),
-    el("p", { class: "small muted", style: "margin:2px 0 6px", text: "Top 12 SKUs by RM, all batches together. Excess = more found than SAP, Short = less." }), box);
-}
-
 /* things to check before signing: same batch keyed on two phones, warehouses nobody counted, late counts */
 function finalChecks(W) {
   var items = [];
@@ -511,7 +508,7 @@ function renderFinal(app, t) {
   cnt = sys + net;
   var nat = sys ? (1 - abs / sys) * 100 : null, onT = W.filter(function (w) { return onTarget(w.kpi.ira); });
   var nFinal = W.filter(function (w) { return w.st === "done"; }).length, SG = signedFor(t.id), nSg = W.filter(function (w) { return SG[w.b]; }).length;
-  saveResults();
+  var SNAP = resultsSnapshot(); saveResults(SNAP);
   app.append(el("div", { class: "md-head" }, headBlock(t, false), el("div", { class: "md-filters" }, f.box,
     el("button", { class: "btn primary", text: "Download all sign-offs (ZIP)", onclick: function () { downloadAll(W.map(function (w) { return w.b; })); } }),
     el("button", { class: "btn", text: "Signed copies · " + nSg + "/" + W.length, onclick: function () { signedDialog(t.id, W.map(function (w) { return w.b; }).sort()); } }),
@@ -533,11 +530,12 @@ function renderFinal(app, t) {
 
   var ck = finalChecks(W); if (ck) app.append(ck);
   app.append(iraChart(W));
+  var mst = S.mdRes || (S.mdRes = { unit: "value", wh: "" }), chg = function (x) { var y = window.scrollY; S.mdRes = x; hooks.render(); window.scrollTo(0, y); };
+  app.append(shortExcessCard(SNAP, mst, chg), topSkusCard(SNAP, mst, chg, 10));
   var grid = el("div", { class: "md-grid" });
   W.slice().sort(function (a, b) { return (a.kpi.ira == null ? 101 : a.kpi.ira) - (b.kpi.ira == null ? 101 : b.kpi.ira); }).forEach(function (w) { grid.append(finalCard(w, f.M[w.b], SG[w.b])); });
   app.append(el("div", { class: "card" }, el("h3", { style: "margin:0", text: "Warehouses · lowest accuracy first" }),
     el("p", { class: "small muted", style: "margin:2px 0 10px", text: "Tap a warehouse for its SKUs, timeline and sign-off PDF." }), grid));
-  app.append(finalDiffs(W));
   if (!imported) app.append(el("div", { class: "card" }, el("h3", { text: "Something still wrong?" }),
     el("p", { class: "small muted", text: "Reopen counting lets the warehouses change their counts again. Download the sign-offs again after closing." }),
     el("button", { class: "btn", text: "Reopen counting", onclick: function () {
@@ -545,24 +543,31 @@ function renderFinal(app, t) {
     } })));
 }
 
-/* final results saved for the public dashboard (same numbers as this view; RM is only shown there with the admin password) */
+/* final results saved for the public dashboard (same numbers as this view; RM shows there only when Finance publishes values) */
 function r4(v) { return v == null || isNaN(v) ? null : Math.round(v * 10000) / 10000; }
 function r2(v) { return v == null || isNaN(v) ? null : Math.round(v * 100) / 100; }
 export function resultsSnapshot() {
   var t = currentTake(), W = branches().map(whState), sys = 0, abs = 0, net = 0, all = {};
+  var R = skuRows(W), SE = {}, skus = [], skuV = [];
+  R.forEach(function (a) {
+    var dq = (a.cnt ? a.pq : 0) - a.sq, dv = (a.cnt ? a.p : 0) - a.s, x = SE[a.b] || (SE[a.b] = { qs: 0, qe: 0, vs: 0, ve: 0 });
+    if (dq < 0) x.qs += dq; else x.qe += dq; if (dv < 0) x.vs += dv; else x.ve += dv;
+    if (Math.abs(dq) >= 0.5 || Math.abs(dv) >= 0.5) { skus.push({ c: a.code, d: a.desc, b: a.b, sq: r2(a.sq), pq: r2(a.pq), cnt: a.cnt }); skuV.push([r2(a.s), r2(a.p)]); }
+  });
   var wh = W.map(function (w) {
-    var c = skuRes(w); sys += w.kpi.sys; abs += w.kpi.abs; net += w.kpi.net; Object.keys(c).forEach(function (k) { all[k] = (all[k] || 0) + c[k]; });
-    return { b: w.b, ira: r4(w.kpi.ira), final: w.st === "done", counted: w.docs.length > 0, nSku: w.nExp, res: c, rm: { sys: r2(w.kpi.sys), counted: r2(w.kpi.sys + w.kpi.net), net: r2(w.kpi.net), abs: r2(w.kpi.abs) } };
+    var c = skuRes(w), x = SE[w.b] || { qs: 0, qe: 0, vs: 0, ve: 0 }; sys += w.kpi.sys; abs += w.kpi.abs; net += w.kpi.net; Object.keys(c).forEach(function (k) { all[k] = (all[k] || 0) + c[k]; });
+    return { b: w.b, ira: r4(w.kpi.ira), final: w.st === "done", counted: w.docs.length > 0, nSku: w.nExp, res: c, q: { short: r2(x.qs), excess: r2(x.qe) },
+      rm: { sys: r2(w.kpi.sys), counted: r2(w.kpi.sys + w.kpi.net), net: r2(w.kpi.net), abs: r2(w.kpi.abs), short: r2(x.vs), excess: r2(x.ve) } };
   });
   var nat = sys ? (1 - abs / sys) * 100 : null;
-  return { v: 1, take: { name: t.name, openedAt: t.openedAt, closedAt: t.closedAt, mode: t.mode, scope: t.scope, skuCount: t.skuCount, stockType: t.stockType, kpiMonth: t.kpiMonth || null,
+  return { v: 2, take: { name: t.name, openedAt: t.openedAt, closedAt: t.closedAt, mode: t.mode, scope: t.scope, skuCount: t.skuCount, stockType: t.stockType, kpiMonth: t.kpiMonth || null,
       imported: !!(S.adm.meta && S.adm.meta.imported), source: (S.adm.meta && S.adm.meta.imported && S.adm.meta.source) || null },
-    target: TARGET, tol: tolPct(), nat: { ira: r4(nat), onTarget: W.filter(function (w) { return onTarget(w.kpi.ira); }).length }, res: all, wh: wh,
-    rm: { sys: r2(sys), counted: r2(sys + net), net: r2(net), abs: r2(abs), top: diffRows(W).slice(0, 12).map(function (a) { return { code: a.code, desc: a.desc, b: a.b, sys: r2(a.sq), counted: a.cnt ? r2(a.pq) : null, rm: r2(a.rm) }; }) } };
+    target: TARGET, tol: tolPct(), nat: { ira: r4(nat), onTarget: W.filter(function (w) { return onTarget(w.kpi.ira); }).length }, res: all, wh: wh, skus: skus,
+    rm: { sys: r2(sys), counted: r2(sys + net), net: r2(net), abs: r2(abs), skuV: skuV } };
 }
-export function saveResults() {
+export function saveResults(d) {
   var t = currentTake(); if (!t.id || t.status !== "closed" || !S.adm || !S.admin) return;
-  var d; try { d = resultsSnapshot(); } catch (e) { return; }
+  if (!d) { try { d = resultsSnapshot(); } catch (e) { return; } }
   var js = JSON.stringify(d), M = S.snapSaved || (S.snapSaved = {});
   if (M[t.id] === js) return;
   M[t.id] = js;

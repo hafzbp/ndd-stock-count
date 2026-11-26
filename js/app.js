@@ -50,7 +50,7 @@ function drawHeader() {
       master: '<path d="M4 6h16M4 12h16M4 18h10"/>', dash: '<path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/>', setup: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>', count: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1h11"/>' };
     [["today", "Today"], ["daily", "Daily"], ["home", "Monthly"], ["master", "Master"], ["dash", "Dashboard"], ["setup", "Settings"], ["count", "Count"]].forEach(function (t) {
       tabs.append(el("button", { class: S.tab === t[0] ? "on" : "", "aria-current": S.tab === t[0] ? "page" : null, onclick: function () {
-        S.tab = t[0]; if (t[0] === "home" || t[0] === "daily") S.viewTake = null; if (t[0] === "daily") S.dcc = null; if (t[0] === "dash") S.dashData = null; if (t[0] === "today") S.todayAt = null;
+        S.tab = t[0]; if (t[0] === "home" || t[0] === "daily") S.viewTake = null; if (t[0] !== "dash" && S.mdView) { S.viewTake = null; S.mdView = false; }   /* a stock take picked on the Dashboard stays there */ if (t[0] === "daily") S.dcc = null; if (t[0] === "dash") { S.dashData = null; S.mdAuto = 0; S.mdPicked = false; if (S.viewTake) { S.viewTake = null; S.adm = null; } } if (t[0] === "today") S.todayAt = null;
         if (t[0] !== "count") loadAdmin().then(render, function (e) { adminErr(e); }); render(); window.scrollTo(0, 0); } }, svg(IC[t[0]], 18), t[1]));
     });
   } else if (supMode()) {

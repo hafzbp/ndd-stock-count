@@ -3,6 +3,7 @@ import { rpc } from "../js/api.js";
 import { el, fmt, tsTxt } from "../js/ui.js";
 import { renderDccStats, ensureDccCss } from "../js/dcc.js";
 import { renderKpi, kpiMonths, demoKpi, demoOps, KPI_CSS } from "../js/kpi.js";
+import { topSkusCard, shortExcessCard } from "../js/mres.js";
 
 var $ = function (s) { return document.querySelector(s); };
 var ST = { not_started: ["Not started", ""], counting: ["Counting", "warn"], submitted: ["Submitted ✓", "ok"] };
@@ -26,13 +27,15 @@ setTab(PICKED || "daily");
 function liveDot(on) { var b = document.querySelector("#dtabs button[data-t=monthly]"); if (!b) return; var i = b.querySelector("i"); if (on && !i) b.append(el("i", { title: "Counting now" })); if (!on && i) i.remove(); }
 
 function draw(d) {
-  if (!PICKED && !draw.once) setTab(d.status === "open" ? "monthly" : "daily"); draw.once = 1;
-  liveDot(d.status === "open");
+  if (!PICKED && !draw.once) setTab(d.status === "open" && (d.branches || []).some(function (b) { return (b.opsDone || 0) + (b.finDone || 0) > 0; }) ? "monthly" : "daily"); draw.once = 1;
   document.title = (d.title || "Stock Count") + " · Dashboard";
   $("#title").textContent = (d.title || "Stock Count") + " · Live dashboard";
   $("#sub").textContent = "Daily cycle count and monthly stock take · updated " + tsTxt(d.generatedAt);
   var mt = (d.take || "") + (d.scope === "partial" ? " · partial, " + d.skuCount + " SKUs" : "") + (d.mode === "single" ? " · single count" : "") + " · " + (d.status === "draft" ? "not started yet" : d.status === "closed" ? "counting closed" : "counting open") + " · updated " + tsTxt(d.generatedAt);
   pr.live = d.take || "";
+  var real = d.status === "open" && (d.branches || []).some(function (b) { return (b.opsDone || 0) + (b.finDone || 0) > 0; });
+  liveDot(real);
+  if (!pr.picked && !pr.auto && pr.list && pr.list.length) { pr.auto = true; if (!real) { pr.sel = pr.list[0].id; showMonthly(); return; } }
   if (pr.sel) return;   // a closed stock take's results are on show
   var B = d.branches || [], app = $("#monthly"); app.innerHTML = "";
   if (pr.list && pr.list.length) app.append(prPicker());
@@ -130,7 +133,7 @@ var PR_CSS = [
   "@media (max-width:560px){.pr-row{grid-template-columns:84px 1fr 58px;gap:8px}.pr-hero .big{font-size:38px}}"
 ].join("\n");
 var PR_RES = [["OK", "Exact", "OK"], ["WITHIN", "Within tolerance", "WITHIN"], ["OVER", "Over tolerance", "OVER"], ["NOT IN SYSTEM", "Not in SAP", "NIS"], ["NOT COUNTED", "Not counted", "NC"], ["PENDING", "Pending", "PEND"]];
-var pr = { list: null, listAt: 0, sel: "", data: {}, pw: null, rm: false, ask: false, err: "", busy: false, live: "" };
+var pr = { list: null, listAt: 0, sel: "", data: {}, live: "", picked: false, auto: false, st: { unit: "qty", wh: "" } };
 function prIra(v) { return v == null ? "-" : (Math.floor(v * 100) / 100).toFixed(2) + "%"; }
 function prOn(v, T) { return v != null && Math.floor(v * 100) / 100 >= T; }
 function prCls(v, T) { return v == null ? "" : prOn(v, T) ? "pos" : v >= 99 ? "pr-wn" : "neg"; }
@@ -154,46 +157,25 @@ async function prLoadList(force) {
 }
 function prPicker() {
   if (!pr.list || !pr.list.length) return null;
-  var sel = el("select", { id: "pr-take", "aria-label": "Monthly results to show", onchange: function (e) { pr.sel = e.target.value; pr.ask = false; pr.err = ""; showMonthly(); } },
+  var sel = el("select", { id: "pr-take", "aria-label": "Monthly results to show", onchange: function (e) { pr.sel = e.target.value; pr.picked = true; showMonthly(); } },
     el("option", { value: "", text: "Live · " + (pr.live || "current stock take") }),
     pr.list.map(function (x) { return el("option", { value: x.id, selected: pr.sel === x.id, text: "Results · " + x.name + " · closed " + prDate(x.closedAt) + (x.imported && !/previous app/i.test(x.name) ? " (previous app)" : "") }); }));
   return el("div", { class: "pr-pick" }, el("label", { for: "pr-take", text: "Showing" }), sel);
 }
 async function prFetch(id) {
-  var args = { p_take: id };
-  if (pr.rm) { var at = adminTok(); if (pr.pw) args.p_password = pr.pw; else if (at) args.p_token = at; }
+  var args = { p_take: id }, at = adminTok(); if (at) args.p_token = at;
   var d = await rpc("public_results", args);
-  if (d.wrongPassword) throw new Error("wrong password");
-  if (pr.rm && !d.withRM) { pr.rm = false; pr.ask = true; }   // the saved login has expired: ask for the password
-  pr.data[id + (d.withRM ? "|rm" : "")] = d; return d;
+  pr.data[id] = d; return d;
 }
 async function showMonthly() {
   var app = $("#monthly");
   if (!pr.sel) { app.innerHTML = ""; app.append(el("div", { class: "center muted", text: "Loading…" })); return load(); }
-  var key = pr.sel + (pr.rm ? "|rm" : ""), d = pr.data[key];
+  var d = pr.data[pr.sel];
   if (!d) {
     app.innerHTML = ""; var pk = prPicker(); if (pk) app.append(pk); app.append(el("div", { class: "center muted", text: "Loading results…" }));
     try { d = await prFetch(pr.sel); } catch (e) { app.lastChild.textContent = "Can't load these results: " + ((e && e.message) || e); return; }
   }
   drawResults(d);
-}
-function lockBox(d) {
-  if (d.withRM) return el("button", { class: "pr-btn", text: "Hide RM", onclick: function () { pr.rm = false; pr.pw = null; pr.ask = false; showMonthly(); } });
-  if (!pr.ask) return el("button", { class: "pr-btn", text: "Show RM…", onclick: async function () {
-    if (adminTok()) { pr.rm = true; try { var x = await prFetch(pr.sel); if (x.withRM) return drawResults(x); } catch (e) { pr.rm = false; } }
-    pr.ask = true; pr.err = ""; drawResults(d); setTimeout(function () { var i = $("#pr-pw"); if (i) i.focus(); }, 30);
-  } });
-  var inp = el("input", { id: "pr-pw", type: "password", autocomplete: "current-password", placeholder: "Owner or Finance password", "aria-label": "Owner or Finance password" });
-  var go = async function () {
-    if (!inp.value || pr.busy) return; pr.busy = true; pr.err = "";
-    try { pr.pw = inp.value; pr.rm = true; var x = await prFetch(pr.sel); pr.ask = false; drawResults(x); }
-    catch (e) { pr.pw = null; pr.rm = false; pr.err = /LOCKED/.test(e.message) ? "Too many wrong passwords. Wait 15 minutes." : /wrong password/i.test(e.message) ? "Wrong password." : (e.message || String(e)); drawResults(d); setTimeout(function () { var i = $("#pr-pw"); if (i) i.focus(); }, 30); }
-    finally { pr.busy = false; }
-  };
-  inp.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
-  return el("div", {}, el("form", { class: "pr-lock", onsubmit: function (e) { e.preventDefault(); go(); } }, inp, el("button", { class: "pr-btn primary", type: "submit", text: "Show RM" }),
-      el("button", { class: "pr-btn", type: "button", text: "Cancel", onclick: function () { pr.ask = false; pr.err = ""; drawResults(d); } })),
-    el("div", { class: "small " + (pr.err ? "neg" : "muted"), style: "margin-top:4px", text: pr.err || "Money values need the owner or Finance password. It is kept only while this tab is open." }));
 }
 function drawResults(d) {
   if (!document.getElementById("pr-css")) document.head.append(el("style", { id: "pr-css", text: PR_CSS }));
@@ -217,7 +199,7 @@ function drawResults(d) {
         el("span", { class: "small muted", text: "Target " + T + "% · " + (d.nat || {}).onTarget + " of " + W.length + " warehouses on target" })),
       el("div", { class: "pr-tiles" }, tiles.map(function (x) { return el("div", { class: "pr-tile" }, el("span", { text: x[0] }), el("b", { class: x[3] || "", text: x[1] }), el("small", { text: x[2] })); }))),
     el("div", { style: "margin-top:14px" }, el("div", { class: "small", style: "display:flex;justify-content:space-between;margin-bottom:4px" }, el("b", { text: "SKU results, all warehouses" }), el("span", { class: "muted", text: fmt(tot) + " SKUs" })), prBar(res, 14), prKey(res)),
-    el("div", { style: "margin-top:12px" }, lockBox(d))));
+    rmOn ? null : el("p", { class: "small muted", style: "margin:10px 0 0", text: "RM values are not published on this dashboard. Finance can publish them in the app: Setup → Public dashboard → values." })));
 
   /* IRA per warehouse, axis 90-100 % */
   var AX = 90, pos = function (v) { return Math.max(0, Math.min(100, (v - AX) / (100 - AX) * 100)); };
@@ -232,6 +214,8 @@ function drawResults(d) {
   });
   app.append(el("div", { class: "card" }, el("h3", { text: "IRA by value per warehouse" }), el("p", { class: "small muted", style: "margin:-4px 0 10px", text: "Axis from 90% to 100% so small gaps show; the dark line is the " + T + "% target." }), box));
 
+  var chg = function (x) { var y = window.scrollY; pr.st = x; drawResults(d); window.scrollTo(0, y); };
+  app.append(shortExcessCard(d, pr.st, chg), topSkusCard(d, pr.st, chg, 10));
   var g = el("div", { class: "grid" });
   rows.forEach(function (w) {
     var c = w.res || {};
@@ -243,15 +227,6 @@ function drawResults(d) {
   });
   app.append(el("h2", { class: "sec", text: "Warehouses · lowest accuracy first" }), g);
 
-  if (rmOn && (R.top || []).length) {
-    var L = el("div", { class: "pr-rows" });
-    R.top.forEach(function (a) {
-      L.append(el("div", {}, el("div", { class: "g" }, el("b", { text: a.code + " · " + a.desc }), el("small", { text: a.b })),
-        el("div", { class: "n" }, el("span", {}, el("em", { text: "System" }), fmt(Math.round(a.sys))), el("span", {}, el("em", { text: "Counted" }), a.counted == null ? "-" : fmt(Math.round(a.counted))),
-          el("span", { class: a.rm < 0 ? "neg" : "" }, el("em", { text: "Diff" }), prRm(a.rm, true)), el("span", { class: "pill " + (a.counted == null ? "" : a.rm < 0 ? "bad" : "ok"), text: a.counted == null ? "Not counted" : a.rm < 0 ? "Short" : "Excess" }))));
-    });
-    app.append(el("div", { class: "card", style: "margin-top:12px" }, el("h3", { text: "Biggest differences" }), el("p", { class: "small muted", style: "margin:-4px 0 6px", text: "Top 12 SKUs by RM, all batches together." }), L));
-  }
 }
 
 load(); setInterval(function () { if (!document.hidden) load(); }, 30000);
