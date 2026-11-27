@@ -42,6 +42,7 @@ await t("username login (any case): first time must change PIN; weak or the temp
   await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: "4820" }), /6 digits/);
   await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: LOPIN }), /not the temporary/);
   await rpc("person_set_pin", { p_token: LOTOK, p_pin: "482061" }); LOPIN = "482061";
+  assert.equal((await rpc("person_set_pin", { p_token: LOTOK, p_pin: "482061" })).ok, true, "the same PIN sent twice (double tap) is fine");
   const o = await login("aisyah.1503", OMPIN); OMTOK = o.token;
   await rpc("person_set_pin", { p_token: OMTOK, p_pin: "739214" }); OMPIN = "739214";
   const [tk] = await q(`select sup, person_id, device_id from public.tokens where token = $1`, [OMTOK]); assert.equal(tk.sup, true, "OM token has supervisor rights"); assert.equal(tk.device_id, null);

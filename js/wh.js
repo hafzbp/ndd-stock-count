@@ -131,9 +131,11 @@ export function renderLogin(app) {
     ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].forEach(function (k) {
       if (!k) { pad.append(el("span")); return; }
       pad.append(el("button", { text: k, "aria-label": k === "⌫" ? "Delete" : k, disabled: L.busy, onclick: function () {
-        var x = L.pin || ""; if (k === "⌫") x = x.slice(0, -1); else if (x.length < PIN_N) x += k;
+        /* one login per PIN: ignore taps while sending, and taps that add no digit */
+        if (L.busy) return;
+        var x = L.pin || "", added = false; if (k === "⌫") x = x.slice(0, -1); else if (x.length < PIN_N) { x += k; added = true; }
         L.pin = x; L.err = ""; hooks.render();
-        if (x.length === PIN_N) doLogin(u.username, x);
+        if (added && x.length === PIN_N) doLogin(u.username, x);
       } }));
     });
     card.append(dots, err, pad, el("p", { class: "center", style: "margin:14px 0 0" },
@@ -166,6 +168,7 @@ hooks.renderLogin = renderLogin;
 
 async function doLogin(user, pass) {
   var w = S.wh, L = w.login;
+  if (L.busy) return;
   L.busy = true; L.err = ""; hooks.render();
   try {
     if (user.indexOf("@") >= 0) {
@@ -200,9 +203,11 @@ function renderPin(app) {
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].forEach(function (k) {
     if (!k) { pad.append(el("span")); return; }
     pad.append(el("button", { text: k, "aria-label": k === "⌫" ? "Delete" : k, disabled: st.busy, onclick: function () {
-      if (k === "⌫") st.v = st.v.slice(0, -1); else if (st.v.length < PIN_N) st.v += k;
+      if (st.busy) return;
+      var added = false;
+      if (k === "⌫") st.v = st.v.slice(0, -1); else if (st.v.length < PIN_N) { st.v += k; added = true; }
       st.err = ""; hooks.render();
-      if (st.v.length === PIN_N) submitPin();
+      if (added && st.v.length === PIN_N) submitPin();
     } }));
   });
   box.append(pad);
@@ -210,6 +215,7 @@ function renderPin(app) {
 }
 async function submitPin() {
   var st = S.wh.pin;
+  if (!st || st.busy) return;
   if (st.step === "new") { st.first = st.v; st.v = ""; st.step = "again"; hooks.render(); return; }
   if (st.v !== st.first) { st.v = ""; st.first = ""; st.step = "new"; st.err = t("pinsDiffer"); hooks.render(); return; }
   try { st.busy = true; hooks.render(); await rpc("person_set_pin", { p_token: st.token, p_pin: st.v }); st.busy = false; startSession(st.res); }
