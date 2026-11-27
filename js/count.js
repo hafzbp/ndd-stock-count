@@ -44,6 +44,7 @@ export function plantPad(title, sub, wantBranch, onOk, inline) {
     if (!v || go.disabled) return; go.disabled = true; go.textContent = "Checking…";
     try {
       var r = await rpc("plant_login", { p_code: v });
+      if (!r.ok && r.people) { var pc = v; v = ""; draw(); err.textContent = r.branch + " signs in with name and PIN on its warehouse device."; if (hooks.whSetup) err.append(el("br"), el("button", { class: "link strong", text: "Ops Manager: set up this device", onclick: function () { closeModal(); hooks.whSetup(pc); } })); return; }
       if (!r.ok) { v = ""; draw(); err.textContent = "No warehouse with that plant code"; return; }
       if (wantBranch && r.branch !== wantBranch) { v = ""; draw(); err.textContent = "That code is for " + r.branch + ", not " + wantBranch; return; }
       S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null; S.lastLogin = { code: v, branch: r.branch }; S.waitBy = S.waitBy || {}; S.waitBy[r.branch] = r.wait || null;
@@ -532,7 +533,8 @@ function renderStart(app) {
       el("button", { class: "btn primary", text: "Start first-time setup", onclick: function () { if (hooks.openLogin) hooks.openLogin(true); } })));
     return;
   }
-  function reset() { S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); }
+  function reset() { if (S.wh && (S.wh.person || S.wh.joined) && hooks.whHome) { if (S.wh.joined) { hooks.whSignOut && hooks.whSignOut(); return; } hooks.whHome(); return; } S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); }
+  if (S.wh && (S.wh.person || S.wh.joined) && st.step === "code") { st = S.start = S.wh.person ? { step: "confirm", branch: S.wh.branch, role: "ops", names: [S.wh.person.name] } : { step: "confirm", branch: S.wh.branch }; }
 
   if (st.step === "code") {
     var wrap = el("div", { class: "cstart" });
@@ -565,6 +567,7 @@ function renderStart(app) {
     }
     wrap.append(el("div", { class: "card padcard" }, pp),
       el("p", { class: "center", style: "margin-top:14px" }, el("button", { class: "link strong", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })),
+      el("p", { class: "center", style: "margin-top:8px" }, el("button", { class: "link", text: "Ops Manager: set up this device for My Warehouse", onclick: function () { hooks.whSetup && hooks.whSetup(""); } })),
       el("p", { class: "center small muted", style: "margin-top:18px", text: "Version " + APP_VERSION }));
     app.append(wrap);
     return;
@@ -573,7 +576,7 @@ function renderStart(app) {
   /* ---- ready: warehouse + what today's count is + team + names, on one screen ---- */
   var ts = tstatus(), t = S.take || {};
   var top = el("div", { class: "rhead" },
-    el("button", { class: "iconbtn", "aria-label": "Different warehouse", onclick: reset }, svg(ICON.back, 22)),
+    el("button", { class: "iconbtn", "aria-label": S.wh && S.wh.person ? "Back to Today" : "Different warehouse", onclick: reset }, svg(ICON.back, 22)),
     el("div", {}, el("div", { class: "rt", text: st.branch }), el("div", { class: "small muted", text: "Your warehouse" })));
   app.append(top);
   var wt = (S.waitBy || {})[st.branch];
@@ -585,7 +588,7 @@ function renderStart(app) {
       el("p", { class: "muted", text: wt === "stopped" ? "There is no daily count at " + st.branch + " today. Ask HQ if this is a mistake." : "HQ hasn't uploaded today's stock (MB52) yet. You can start as soon as it's in." }),
       el("div", { class: "row", style: "justify-content:center" },
         el("button", { class: "btn primary", text: "Check again", onclick: async function (e) { var bt = e.currentTarget; bt.disabled = true; bt.textContent = "Checking…"; try { await loadBranch(st.branch); S.take = (S.br[st.branch] || {}).take || S.take; } catch (x) { } hooks.render(); } }),
-        el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
+        el("button", { class: "btn", text: S.wh && S.wh.person ? "Back to Today" : "Different warehouse", onclick: reset }))));
     return;
   }
   if (ts !== "open") {
@@ -594,7 +597,7 @@ function renderStart(app) {
       el("p", { class: "muted", text: S.notOpenMsg || (ts === "draft" ? "Your admin will open the stock take. Try again when they tell you it's open." : "This stock take is finished. Ask your admin if something still needs counting.") }),
       el("div", { class: "row", style: "justify-content:center" },
         el("button", { class: "btn primary", text: "Try again", onclick: async function () { S.notOpenMsg = ""; try { var bd = await rpc("counter_branch", { p_token: S.tokens[st.branch], p_branch: st.branch }); S.take = bd.take; S.waitBy = S.waitBy || {}; S.waitBy[st.branch] = bd.wait || null; } catch (e) { try { S.cfg = await rpc("public_config", {}); S.take = Object.assign({}, S.take || {}, S.cfg.take); } catch (e2) { } } hooks.render(); } }),
-        el("button", { class: "btn", text: "Different warehouse", onclick: reset }))));
+        el("button", { class: "btn", text: S.wh && S.wh.person ? "Back to Today" : "Different warehouse", onclick: reset }))));
     return;
   }
   if (singleMode() && !st.role) { st.role = "ops"; st.names = st.names || []; }

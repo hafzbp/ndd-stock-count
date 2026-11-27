@@ -1,7 +1,8 @@
-# NDD Stock Count
+# My Warehouse
 
-Double-count stock take for Nabati Malaysia NDD warehouses: Ops counts, Finance counts again separately,
-the app compares both and then compares the agreed count to SAP MB52.
+The warehouse app for Nabati Malaysia NDDs (formerly NDD Stock Count): monthly stock take (Ops and Finance
+count separately), daily cycle count (DCC), and LSH, the daily stock ledger each warehouse keeps and closes
+at the cut-off, checked every evening against SAP MB52.
 
 - **App (counters + Finance):** `index.html` → https://hafzbp.github.io/ndd-stock-count/
 - **Public live dashboard:** `dashboard/` → https://hafzbp.github.io/ndd-stock-count/dashboard/
@@ -10,10 +11,21 @@ the app compares both and then compares the agreed count to SAP MB52.
 ## Who logs in how
 | Who | How | Can do |
 |---|---|---|
-| Counter (Ops / Finance check) | Warehouse **SAP plant code** (from the MB52) | Count, scan, photos, sign, submit — only their own phone's counts |
-| Admin | Admin password (🔒 Admin) | Run stock takes: wizard, monitor, recount, close, export, settings |
-| Owner | Owner password | Everything + passwords, clear counts, backup |
+| Warehouse people (NDD on **Name and PIN**) | The NDD's warehouse device, set up once by the Ops Manager (plant code + their PIN). Tap your name, enter your PIN; **Done** or 5 minutes without use signs out | Logistic Officer: record stock movements (LSH). Warehouse Admin / Supervisor: daily count. Ops Manager: everything, close the day, approve corrections, explain differences, add people |
+| Counter (NDD still on **plant code**) | Warehouse SAP plant code | Count, scan, photos, sign, submit |
+| Monthly stock take on a set-up device | "Join stock take" tile on the people screen | Ops or Finance count, names, signatures (as before) |
+| HQ | Named account: email + password (superadmin, HQ admin, HQ Finance). Old shared passwords work until the superadmin switches them off | Run everything; superadmin manages HQ accounts |
 | Anyone | Dashboard link | What Settings → Public dashboard allows |
+
+HQ menu: **Overview · Stock · Count (Daily, Monthly, live counts, count here) · KPI · Setup (Settings, People & devices, HQ accounts)**.
+
+## LSH, the daily stock ledger (NDDs with Stock switched on)
+- Areas: **good stock**, **staging** (invoiced in SAP, still in the warehouse: SAP posts GI at invoice) and **bad stock**.
+- Movements, each with its document: goods received, invoice to staging, loaded on truck, failed delivery back, SAP reversal posted, redeliver, customer return, move to bad stock, transfer out. Typed as cartons, boxes and packs (with product photos where we have them), stored in pcs.
+- Undo your own entry for 10 minutes; after that a correction, approved by the Ops Manager (an OM's own by HQ).
+- The Ops Manager closes the day at the cut-off (16:00) with their PIN; a day nobody closed is closed by the app at midnight, marked late.
+- HQ uploads one MB52 at 17:00 (Count → Daily). For each closed day the app compares good stock with MW00/MW01 and bad stock with BS00/BS01/SH00 (staging is left out). Each difference gets one of four reasons and is due in 24 hours; the same difference the next day keeps its reason.
+- Opening stock and resets: Stock → Opening and reset, from an MB52 or a closed stock take.
 
 ## A stock take, start to finish
 1. **Stock take tab → wizard (Draft):** name + Total or Partial + Double or Single count → pick SKUs (Partial) → upload MB52 → review → **Open counting**.
@@ -42,7 +54,11 @@ js/state.js    this phone's counts, local backup, autosave, sync
 js/count.js    counter screens          js/scan.js     camera + handheld barcode scanning
 js/photos.js   warehouse photos         js/master.js   admin master view
 js/setup.js    Settings tab + MB52 card js/export.js   Excel + sign-off PDF
-js/app.js      start-up, header, tabs, logins
+js/app.js      start-up, header, HQ menu, logins
+js/wh.js       warehouse device: set-up, people, PIN, Today, sign-out   js/lsh.js  LSH screens on the device
+js/whadmin.js  HQ: Stock (LSH vs SAP, staging, opening), People & devices, HQ accounts
+js/i18n.js     English / Bahasa Melayu words for the warehouse device
+assets/sku/    product photos (carton, box, pack) by SKU code
 dashboard/     public dashboard
 sql/NNN_*.sql  database, numbered migrations (apply in order)
 supabase/functions/photos   edge function for photos (private storage)
@@ -50,9 +66,10 @@ tests/         backend + UI tests (run locally, no Supabase needed)
 vendor/        zxing (barcodes), SheetJS (Excel), jsPDF (PDF)
 ```
 Security model: every table is closed to the public API. The page can only call the functions in
-`sql/`, and each one checks a token on the server. Counter login uses the warehouse plant code (a known
-code, chosen for simplicity, so it identifies the warehouse rather than keeping outsiders out); admin
-and owner passwords are stored as bcrypt hashes.
+`sql/`, and each one checks a token on the server. Warehouse devices hold a random key (stored hashed);
+people sign in with bcrypt-hashed PINs (5 wrong tries lock for 15 minutes) and get a 12-hour token tied to
+the person and the device. Plant-code login remains for NDDs not yet moved; it identifies the warehouse
+rather than keeping outsiders out. HQ passwords are bcrypt hashes.
 
 ### Adding a feature
 - **A new setting:** add the key to `admin_settings` (or prefix it `x_` — those are accepted without a migration), read it from `S.adm.settings` in the UI.
@@ -62,9 +79,10 @@ and owner passwords are stored as bcrypt hashes.
 ## Tests
 ```
 cd tests && npm i
-node backend.test.mjs   # + python3 ui_test.py and python3 ui_daily.py (UI, local server)                         # 30 checks on the real SQL (PGlite)
+node backend.test.mjs                          # 66 checks on the real SQL (PGlite)
+node mw.test.mjs                               # 26 checks: device/person login, HQ accounts, LSH
 BOOTSTRAP_CODE=SETUP-123 node server.mjs &     # local backend on :8787
-python3 ui_test.py                             # 49 end-to-end checks, needs Playwright + Chrome
+python3 ui_test.py                             # 84 end-to-end checks, needs Playwright + Chrome
 ```
 
 ## Free plan notes

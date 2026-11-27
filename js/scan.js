@@ -49,7 +49,7 @@ export function openScanner() {
       tick = el("div", { class: "tick", "aria-hidden": "true" }),
       idle = el("div", { class: "idle" }, el("div", { text: "Starting camera…" }), err = el("div", { class: "small", style: "color:#fff;max-width:320px" }))),
     el("div", { class: "scanfoot" },
-      el("button", { class: "btn block", text: "Search SKU without scanning", onclick: function () { paused = true; openPicker(null); } })));
+      el("button", { class: "btn block", text: "Search SKU without scanning", onclick: function () { if (S.scanHook) { S.scanHook = null; closeScanner(); return; } paused = true; openPicker(null); } })));
   tick.innerHTML = '<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   video.muted = true;
   ov._aim = aim; ov._tick = tick; ov._idle = idle; ov._hint = hint;
@@ -98,6 +98,7 @@ async function loop() {
 }
 function stopStream() { if (stream) stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
 export function closeScanner() {
+  if (S.scanHook && ov) setTimeout(function () { S.scanHook = null; }, 0);
   running = false; paused = true; stopStream(); torchOn = false;
   if (ov) { ov.remove(); ov = null; } closeSheet(false);
   document.body.classList.remove("noscroll");
@@ -113,6 +114,7 @@ function detected(code) {
   ov._aim.classList.add("hit");
   var tk = ov._tick; tk.classList.remove("on"); void tk.offsetWidth; tk.classList.add("on");
   beep();
+  if (S.scanHook) { var h = S.scanHook; setTimeout(function () { closeScanner(); h(code); }, 350); return; }
   setTimeout(function () { openScanSheet(code); }, 450);
 }
 

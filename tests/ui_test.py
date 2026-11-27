@@ -9,6 +9,12 @@ BASE = os.environ.get("BASE", "http://localhost:8787")
 CAM = os.environ.get("CAM", "/home/claude/scantest/cam/near.y4m")
 OUT = "/tmp/ndd-ui"; os.makedirs(OUT, exist_ok=True)
 ok = 0; bad = 0
+TABMAP = {"Today": ("Overview", None), "Daily": ("Count", "Daily count"), "Monthly": ("Count", "Monthly stock take"), "Master": ("Count", "Monthly live counts"), "Dashboard": ("KPI", None), "Settings": ("Setup", "Settings"), "Count": ("Count", "Count here")}
+def tab(pg, name):
+    g, s = TABMAP[name]
+    pg.click(f"#tabs button:text-is('{g}')")
+    if s: pg.click(f".subtabs button:text-is('{s}')")
+
 def check(name, cond, extra=""):
     global ok, bad
     if cond: ok += 1; print("  ✓", name)
@@ -68,7 +74,7 @@ with sync_playwright() as p:
     ow.fill("input[placeholder='Setup code']", "SETUP-123"); ow.fill("input[placeholder^='New owner password']", "OwnerPass1"); ow.fill("input[placeholder='Repeat password']", "OwnerPass1")
     ow.click(SB("Save")); ow.wait_for_selector("text=Owner password set"); ow.click(SB("OK"))
     check("owner lands on the stock take wizard (Draft)", ow.is_visible("text=1. Name and type") and ow.is_visible(".state.draft"))
-    check("header says Admin, tabs Today/Daily/Monthly/Master/Dashboard/Settings/Count", " ".join(ow.inner_text("#tabs").split()) == "Today Daily Monthly Master Dashboard Settings Count" and "Log out" in ow.inner_text("#lockBtn"), ow.inner_text("#tabs"))
+    check("header: tabs Overview/Stock/Count/KPI/Setup", " ".join(ow.inner_text("#tabs").split()) == "Overview Stock Count KPI Setup" and "Log out" in ow.inner_text("#lockBtn"), ow.inner_text("#tabs"))
     ow.fill("input[placeholder='Cycle count Nov week 4']", "Test count"); ow.click(".choice:has-text('Total')"); ow.click(B("Save and continue"))
     ow.wait_for_selector("text=3. Upload the SAP MB52"); check("Total skips the SKU step", True)
     ow.set_input_files(".card:has(h3:text-is('MB52 file')) input[type=file]", f"{OUT}/mb52.xlsx"); ow.wait_for_selector("#sheet >> text=New branches in this MB52")
@@ -80,7 +86,7 @@ with sync_playwright() as p:
     rt = ow.inner_text(".card:has(h3:text-is('Warehouses ready'))"); check("plant codes shown per warehouse", "1501" in rt and "1503" in rt, rt)
 
     print("owner: settings")
-    ow.click("#tabs button:text-is('Settings')"); ow.wait_for_selector("text=Pcs per Carton / Box")
+    tab(ow, 'Settings'); ow.wait_for_selector("text=Pcs per Carton / Box")
     ow.fill(".card:has(h3:text-is('Pcs per Carton / Box')) textarea", "A1\t24\t\nB2\t50\t10\nC3\t12\t"); ow.click(B("Save factors")); ow.wait_for_selector("#sheet >> text=3 SKU(s) updated"); ow.click(SB("OK"))
     ow.set_input_files(".card:has(h3:text-is('Barcode master')) input[type=file]", f"{OUT}/barcodes.xlsx"); ow.wait_for_selector("#sheet >> text=Load barcodes?"); ow.click(SB("Load")); ow.wait_for_selector("#sheet >> text=1 barcode(s) saved"); ow.click(SB("OK"))
     ow.click(B("Paste from Excel")); ow.fill("textarea[placeholder^='Paste 3 columns']", "Ali Rahman\tNDD Alpha\tCounter\nBudi\tNDD Alpha\tCounter\nSiti Aminah\tNDD Alpha\tChecker")
@@ -94,7 +100,7 @@ with sync_playwright() as p:
     code(op, "1501"); op.wait_for_selector("text=Today's list isn't ready yet"); check("no MB52 today, monthly still a draft: counter told to wait for HQ", "NDD Alpha" in op.inner_text("main") and "HQ hasn't uploaded today's stock" in op.inner_text("main"))
 
     print("owner: open counting")
-    ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector("text=3. Upload the SAP MB52"); ow.click("main button:text-is('Continue')")
+    tab(ow, 'Monthly'); ow.wait_for_selector("text=3. Upload the SAP MB52"); ow.click("main button:text-is('Continue')")
     ow.wait_for_selector("text=4. Review and open counting"); msgtxt = ow.input_value(".card textarea")
     check("one WhatsApp message for all warehouses", "plant code" in msgtxt and "/?" not in msgtxt.split("link")[-1][:5], msgtxt)
     ow.click("main button:text-is('Open counting')"); ow.click("#sheet button:text-is('Open')"); ow.wait_for_selector(".state.open")
@@ -152,11 +158,11 @@ with sync_playwright() as p:
     op.evaluate("window.dispatchEvent(new Event('online'))"); op.wait_for_timeout(1500); check("autosave → All saved", "All saved" in op.inner_text("#pill"), op.inner_text("#pill"))
 
     print("admin logs out in the middle of counting")
-    ow.click("#lockBtn"); ow.wait_for_selector("text=Start counting"); check("owner logged out → plain counter screen", "Admin" in ow.inner_text("#lockBtn"))
+    ow.click("#lockBtn"); ow.wait_for_selector("text=Start counting"); check("owner logged out → plain counter screen", "HQ" in ow.inner_text("#lockBtn"))
     op.fill(".sbox input", "A1"); op.dispatch_event(".sbox input", "input"); op.click(".seg button:text-is('All')"); op.wait_for_timeout(200)
     op.reload(); op.wait_for_selector(".chead"); check("counter unaffected: still counting after reload", not op.is_visible("text=Start counting"))
     op.click(".seg button:text-is('Counted')"); check("counts still there", "53 PCS" in op.locator(".sku:has-text('A1')").first.inner_text())
-    ow.click("#lockBtn"); ow.fill("#sheet input[type=password]", "AdmPass99"); ow.click(SB("Unlock")); ow.wait_for_selector(".state.open")
+    ow.click("#lockBtn"); ow.fill("#sheet input[type=password]", "AdmPass99"); ow.click(SB("Log in")); ow.wait_for_selector(".state.open")
     pt = ow.inner_text(".card:has(h3:text-is('Progress'))"); check("admin back in: still Open, progress shows ops 3/3", "3 / 3" in pt and "Counting" in pt, pt)
 
     print("submit with photos")
@@ -185,7 +191,7 @@ with sync_playwright() as p:
     wa.click(B("Continue here anyway")); wa.wait_for_selector("text=Start counting"); check("can continue anyway", True)
 
     print("admin: master, recount, close, results")
-    ow.click("#tabs button:text-is('Master')"); ow.wait_for_selector("text=Progress - Ops count vs Finance check")
+    tab(ow, 'Master'); ow.wait_for_selector("text=Progress - Ops count vs Finance check")
     vt = ow.inner_text(".card:has-text('Ops vs Finance, then')"); check("variance: B2 RECOUNT, C3 OVER", "RECOUNT" in vt and "OVER 2%" in vt, vt[:300])
     ow.locator("button.link:has-text('📷 3')").first.click(); ow.wait_for_selector("#sheet .pthumb img"); check("admin sees 3 warehouse photos", ow.locator("#sheet .pthumb img").count() == 3); ow.click(SB("Close"))
     ow.click(B("Send recount list")); ow.click("#sheet button:text-is('Send')"); ow.wait_for_selector("#sheet >> text=Recount list sent"); ow.click(SB("OK"))
@@ -196,7 +202,7 @@ with sync_playwright() as p:
     check("sign-off PDF has the warehouse photo page (3 ops + 3 finance)", b"Warehouse photos \\(6\\)" in pdfb and pdfb.count(b"/Subtype /Image") >= 4, (pdfb.count(b"/Subtype /Image"), os.path.getsize(f"{OUT}/signoff.pdf")))
     db = phone(1280, 800); db.goto(BASE + "/dashboard/?api=local"); db.wait_for_selector("#monthly >> text=NDD Alpha"); check("dashboard: Monthly tab opens first while counting", db.inner_text("#dtabs button.on").startswith("Monthly"))
     t = db.inner_text("#monthly"); check("dashboard: progress while open", "Variance is not published" in t and "Ops: Counting" in t, t[:300])
-    ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector(".state.open"); ow.click(B("Close counting")); ow.click("#sheet button:text-is('Close')"); ow.wait_for_selector(".state.closed")
+    tab(ow, 'Monthly'); ow.wait_for_selector(".state.open"); ow.click(B("Close counting")); ow.click("#sheet button:text-is('Close')"); ow.wait_for_selector(".state.closed")
     rs = ow.inner_text(".card:has(h3:text-is('Results'))"); check("closed: results per warehouse", "NDD Alpha" in rs and "TOTAL" in rs, rs)
     with ow.expect_download() as d: ow.click(B("Export to Excel"))
     d.value.save_as(f"{OUT}/master.xlsx"); check("Excel export downloads", os.path.getsize(f"{OUT}/master.xlsx") > 5000); ow.click(SB("OK"))
@@ -221,9 +227,9 @@ with sync_playwright() as p:
 
     print("single count + no clear-all")
     check("header credit line", "Built by TaskForce Team" in ow.inner_text("header"))
-    ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector(".state.open")
+    tab(ow, 'Monthly'); ow.wait_for_selector(".state.open")
     ow.click(B("Close counting")); ow.click("#sheet button:text-is('Close')"); ow.wait_for_selector(".state.closed")
-    ow.click("#tabs button:text-is('Master')"); ow.wait_for_selector("text=Reopen counting")
+    tab(ow, 'Master'); ow.wait_for_selector("text=Reopen counting")
     check("Master: no Clear all counts; Start new stock take instead", not ow.is_visible(B("Clear all counts")) and ow.is_visible(B("Start new stock take")))
     ow.click(B("Start new stock take")); ow.wait_for_selector("text=New stock take"); check("Master → new stock take wizard", True)
     ow.fill("input[placeholder='Cycle count Nov week 4']", "Single W5"); ow.click(".choice:has-text('Total')"); ow.click(".choice:has-text('Single count')"); ow.click(B("Save and continue"))
@@ -239,7 +245,7 @@ with sync_playwright() as p:
     op.click(".skuh:has-text('C3')"); op.wait_for_selector("#skuv")
     op.locator("#skuv .batch").first.locator(".val").last.click(); [op.click(f"#sheet .pad button:text-is('{k}')") for k in ["6","0"]]; op.click(SB("OK")); op.click("#skuv [aria-label='Back to list']"); 
     op.wait_for_timeout(2500); op.evaluate("window.dispatchEvent(new Event('online'))"); op.wait_for_timeout(1500)
-    ow.click("#tabs button:text-is('Master')"); ow.click(B("↻")); ow.wait_for_timeout(1200)
+    tab(ow, 'Master'); ow.click(B("↻")); ow.wait_for_timeout(1200)
     mt = ow.inner_text("main")
     check("Master single: Counted column, COUNTED status, no Finance column", "Counted (PCS)" in mt and "COUNTED" in mt and "Finance (PCS)" not in mt and "Single count" in mt, mt[:600])
     ex = ow.locator("label:has-text('Exceptions only') input")
@@ -251,8 +257,8 @@ with sync_playwright() as p:
     ow.screenshot(path=f"{OUT}/master_single.png", full_page=True); op.screenshot(path=f"{OUT}/ops_single.png")
 
     print("counter log out / log in again")
-    check("counter header: only Log out (no Admin, no Dashboard)", op.inner_text("#lockBtn").strip() == "Log out" and not op.is_visible("#dashBtn"), op.inner_text("header"))
-    check("credit line right under the title", op.inner_text("header .ttl").split("\n")[:2] == ["NDD Stock Count", "Built by TaskForce Team 🐯"], op.inner_text("header .ttl"))
+    check("counter header: only Log out (no HQ login, no Dashboard)", op.inner_text("#lockBtn").strip() == "Log out" and not op.is_visible("#dashBtn"), op.inner_text("header"))
+    check("credit line right under the title", op.inner_text("header .ttl").split("\n")[:2] == ["My Warehouse", "Built by TaskForce Team 🐯"], op.inner_text("header .ttl"))
     op.context.set_offline(True); op.click(".seg button:text-is('All')"); op.wait_for_timeout(200)
     op.click(".skuh:has-text('C3')"); op.wait_for_selector("#skuv")
     op.locator("#skuv .batch").first.locator(".val").last.click(); [op.click(f"#sheet .pad button:text-is('{k}')") for k in ["C", "5", "8"]]; op.click(SB("OK")); op.click("#skuv [aria-label='Back to list']"); 
@@ -260,7 +266,7 @@ with sync_playwright() as p:
     (op.click("#skuv [aria-label='Back to list']") if op.is_visible("#skuv") else None); op.click("#lockBtn"); op.wait_for_selector("#sheet >> text=Your counts stay saved"); op.click("#sheet button:text-is('Log out')")
     op.wait_for_selector("#sheet >> text=Some changes have not uploaded yet"); check("offline log out: warns changes kept on phone", True); op.click(SB("OK"))
     op.wait_for_selector("text=Continue a count"); op.wait_for_timeout(2500)
-    check("after log out: plant code screen, Admin + Dashboard back, no popup", op.get_attribute("#lockBtn", "title") == "Admin login" and op.is_visible("#dashBtn") and not op.is_visible("#sheet .pad") and "kept on phone" in op.inner_text("#pill").lower(), op.inner_text("#pill"))
+    check("after log out: plant code screen, Admin + Dashboard back, no popup", op.get_attribute("#lockBtn", "title") == "HQ login" and op.is_visible("#dashBtn") and not op.is_visible("#sheet .pad") and "kept on phone" in op.inner_text("#pill").lower(), op.inner_text("#pill"))
     op.context.set_offline(False)
     op.click(".big:has-text('NDD Alpha')"); op.wait_for_selector("#sheet .pad"); [op.click(f"#sheet .pad button:text-is('{d}')") for d in "1501"]; op.click("#sheet button:text-is('Next')")
     op.wait_for_selector("text=COUNT - count every SKU"); op.wait_for_timeout(3000)
@@ -274,7 +280,7 @@ with sync_playwright() as p:
     d4.value.save_as(f"{OUT}/single.pdf"); ow.click(SB("OK")); check("single: Excel + PDF download", os.path.getsize(f"{OUT}/single.pdf") > 5000)
 
     print("HQ: delete a count, stop & reset the monthly stock take")
-    ow.click("#tabs button:text-is('Monthly')"); ow.wait_for_selector(".state.open"); ow.wait_for_selector(".mcard:has-text('NDD Alpha') >> text=Delete a count…")
+    tab(ow, 'Monthly'); ow.wait_for_selector(".state.open"); ow.wait_for_selector(".mcard:has-text('NDD Alpha') >> text=Delete a count…")
     ow.click(".mcard:has-text('NDD Alpha') >> text=Delete a count…"); ow.wait_for_selector("#sheet >> text=Delete a count · NDD Alpha")
     check("monthly: delete list shows the count", "Ali Rahman" in ow.inner_text("#sheet"), ow.inner_text("#sheet")); ow.click(SB("Close"))
     ow.click(B("Stop & reset…")); ow.wait_for_selector("#sheet >> text=Stop & reset this stock take?")

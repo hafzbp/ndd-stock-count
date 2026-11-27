@@ -253,7 +253,7 @@ export async function exportKpi(K, inScope, xlsxLib, demo) {
   if (s3.length === 1) s3.push(["No month-end stock take marked for this month."]);
   var s4 = [["Warehouse", "Item", "Description", "Var PCS", "Var RM"]];
   B.forEach(function (b) { (b.top || []).forEach(function (t) { s4.push([b.branch, t.code, t.desc || "", t.varQ, t.varRm]); }); });
-  var notes = [["NDD Stock Count - KPI report" + (demo ? " (DEMO DATA - made up)" : "")], ["Month", monTxt(K.month)], ["As of", K.today], ["Minimum SKUs a day", K.minSkus], [],
+  var notes = [["My Warehouse - KPI report" + (demo ? " (DEMO DATA - made up)" : "")], ["Month", monTxt(K.month)], ["As of", K.today], ["Minimum SKUs a day", K.minSkus], [],
     ["KPI001", "Daily cycle count. A working day passes when the count is submitted the same day (Malaysia time) with at least the minimum SKUs counted. Achievement = passed ÷ HKE. Target " + T1 + "%."],
     ["HKE", "Working days of the warehouse so far, without off days, holidays, days a monthly stock take was open and days with no daily list (no MB52 uploaded). A day the supervisor skipped counts as failed."],
     ["KPI002", "Stock take at month end. IRA = 1 − Σ |physical − SAP| RM per SKU ÷ SAP value (good stock). A SKU nobody counted counts as not found. Target ≥ " + T2 + "%."],

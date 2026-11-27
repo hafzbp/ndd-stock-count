@@ -160,7 +160,7 @@ export async function signoffPdf(b, quiet) {
   var lc = {}, sk = {}, sysV = 0, agV = 0, vv = 0; Vr.forEach(function (o) { lc[o.status] = (lc[o.status] || 0) + 1; sysV += (o.sys || 0) * (o.cost || 0); if (o.counted) agV += (o.phys || 0) * (o.cost || 0); vv += o.vv || 0; });
   var G = Vr.skuGroups || {}; Object.keys(G).forEach(function (c) { var f = G[c].flag; sk[f] = (sk[f] || 0) + 1; });
   var sg = isSingle(), allSub = (sg ? ses.length : ops.length && fin.length) && ses.every(function (d) { return d.status === "submitted"; }), open = (lc.RECOUNT || 0) + (lc["WAITING OPS"] || 0) + (lc["WAITING FINANCE"] || 0) + (lc["NEEDS PCS FACTOR"] || 0), final = allSub && !open;
-  var title = (S.adm.settings && S.adm.settings.title) || "NDD Stock Count", tk = currentTake();
+  var title = (S.adm.settings && S.adm.settings.title) || "My Warehouse", tk = currentTake();
   var d = new J({ unit: "mm", format: "a4" }), W = 210, y = 16, F = function (n) { return fmt(n); }, R = function (n) { return n == null ? "" : fmt(n, 2); };
   /* company header: logo + name, red rule */
   var logo = await logoData(), lx = 14;
@@ -293,7 +293,7 @@ export async function exportDailyReport(from, to, only) {
   Object.keys(rep).map(function (k) { return rep[k]; }).filter(function (x) { return x.times >= 2; }).sort(function (a, b) { return b.times - a.times || b.abs - a.abs; })
     .forEach(function (x) { rp.push([x.b, x.c, x.d, x.n, x.times, r2(x.net), r2(x.abs), x.last]); });
   if (rp.length === 1) rp.push(["No SKU was out of tolerance twice in this period."]);
-  var notes = [["NDD Stock Count - Daily cycle count report"], ["Period", from + " to " + to], ["Warehouses", only ? only.join(", ") : "All"], ["Generated", kl(nowIso())], ["Tolerance", "±" + tol + "% per SKU"], [],
+  var notes = [["My Warehouse - Daily cycle count report"], ["Period", from + " to " + to], ["Warehouses", only ? only.join(", ") : "All"], ["Generated", kl(nowIso())], ["Tolerance", "±" + tol + "% per SKU"], [],
     ["Status", "On time = submitted inside the count window; Late = after the window end; Missed = working day with nothing submitted; Skipped = supervisor gave a reason; Off day / Nothing due = no count planned."],
     ["Accuracy %", "SKUs exact or within tolerance, out of SKUs counted."], ["Class", "A = top 80% of stock value, B = next 15%, C = the rest, R = recount of yesterday's out-of-tolerance SKU, S = added by the supervisor."],
     ["System stock", "SAP MB52 good stock of the stock date shown (bad-stock locations, blocked stock and transit left out)."], ["Var", "Counted minus system. Daily counts are per SKU: a batch in the system that the counter did not find counts as 0 (Detail: 'batch not found'). Var RM uses the MB52 unit value; empty when the MB52 had no values."]];

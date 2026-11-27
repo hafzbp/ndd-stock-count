@@ -1,0 +1,82 @@
+/* Words on the warehouse device, in English and Bahasa Melayu. t("key", {n: 3}) fills {n}. */
+import { S } from "./state.js";
+
+var W = {
+  en: {
+    appName: "My Warehouse", whoAreYou: "Who are you?", tapName: "Tap your name", pinFor: "PIN for {name}", forgotPin: "Forgot your PIN? Ask your Ops Manager.",
+    wrongPin: "Wrong PIN. {n} tries left.", locked: "Locked until {t}. Your Ops Manager can unlock it.", setPin: "Choose your own PIN", setPinSub: "{n} digits that only you know. Not 1234, not all the same.",
+    repeatPin: "Enter it again", pinsDiffer: "The two PINs are different. Start again.", done: "Done", notMe: "Not me", signedOutIdle: "Signed out after 5 minutes without use. Nothing was lost.",
+    today: "Today", stock: "Stock", count: "Count", joinTake: "Join stock take", joinTakeSub: "Monthly stock take is open here",
+    setupDevice: "Set up this device", setupSub: "Ops Manager: enter the warehouse plant code, then sign in. The device then stays with this warehouse.",
+    plantCode: "Plant code", next: "Next", back: "Back", cancel: "Cancel", save: "Save", saved: "Saved", close: "Close", yes: "Yes", no: "No",
+    roles_lo: "Logistic Officer", roles_admin: "Warehouse Admin", roles_sup: "Supervisor", roles_om: "Ops Manager",
+    thingsToday: "{n} things to do", oneThing: "1 thing to do", timeLeft: "{h} h {m} min left", late: "Late: past the cut-off", nothingToday: "Nothing waiting right now", inTimeOrder: "In order of time. Tap one to start.",
+    dailyCount: "Daily count", byTime: "by {t}", skusToCount: "{n} SKUs to count", recordMove: "Record a movement",
+    stgLate: "Staging waiting too long", stgLateSub: "{n} invoice(s) in staging over 24 hours", failedWait: "Failed deliveries waiting for SAP", failedWaitSub: "{n} invoice(s) need a reversal or a new trip",
+    toApprove: "Corrections to approve", toApproveSub: "{n} waiting for you", diffs: "Explain differences", diffsSub: "{n} SKU(s) differ from SAP", closeDay: "Close the day", closeDaySub: "Closes at {t}",
+    dayClosed: "Day closed {t}", doneToday: "Done today", movesToday: "Stock movements recorded", noLsh: "Stock recording (LSH) is not switched on for this warehouse yet.",
+    good: "Good stock", staging: "Staging", bad: "Bad stock", ctn: "ctn", cartons: "Cartons", boxes: "Boxes", packs: "Packs", total: "Total",
+    t_receive: "Goods received", t_invoice: "Invoice to staging", t_load: "Loaded on truck", t_fail_back: "Failed delivery back", t_return: "Customer return",
+    t_to_bs: "Move to bad stock", t_transfer_out: "Transfer out", t_reversal: "Reversal posted", t_redeliver: "Redeliver", t_correction: "Correction", t_reset: "Stock reset",
+    s_receive: "in → Good stock", s_invoice: "Good stock → Staging", s_load: "Staging → out", s_fail_back: "back → Staging", s_return: "in → Bad or Good", s_to_bs: "Good → Bad stock", s_transfer_out: "Good stock → out",
+    docNo: "Document number", doc_receive: "DO or GR number", doc_invoice: "Invoice number", doc_fail_back: "Invoice number", doc_return: "Return or CN number", doc_to_bs: "Reference (optional)",
+    doc_transfer_out: "STO or DO number", doc_reversal: "Invoice number", doc_redeliver: "Invoice number", refNo: "SAP reversal number", note: "Note", noteOpt: "Note (optional)",
+    addSku: "Add SKU", scan: "Scan", search: "Search name or code", lines: "SKUs on this document", noLines: "No SKU added yet",
+    damaged: "Received damaged → bad stock", goodCond: "Good condition", badCond: "Bad condition", check: "Check, then save", saveEntry: "Save",
+    why: "Why did it come back?", r_outlet_closed: "Outlet closed", r_refused: "Refused / no payment", r_wrong_item: "Wrong item or quantity", r_no_time: "Ran out of time", r_other: "Other",
+    invoiceLines: "What came back", maxOut: "max {n}", nothingOut: "Nothing on this invoice went out on a truck.", findInvoice: "Find invoice",
+    undo: "Undo", undone: "Undone", askFix: "Ask for a correction", fixWhy: "Why does it need correcting?", fixSent: "Sent to your Ops Manager",
+    entriesToday: "Today's entries", seeAll: "See all", noEntries: "Nothing recorded yet today", by: "by {n}",
+    stagingTitle: "Staging", stagingSub: "Invoiced in SAP, still in the warehouse. Don't count this area.", waitingLoad: "Waiting to load", cameBack: "Came back, waiting for SAP",
+    loadSel: "Loaded on truck ({n})", tickInvoices: "Tick the invoices on this truck", age: "{h} h", ageDays: "{d} days", waitingRev: "Waiting SAP reversal",
+    closeTitle: "Close the day", closeWarn: "Warnings don't stop the close. They stay on the day's record.", closeBtn: "Close and lock", closePin: "Enter your PIN to close",
+    copyList: "Copy list for Sales Admin", copied: "Copied. Paste it in WhatsApp.", closedOk: "Day closed. Thank you!", closingStock: "Closing stock", comparedSap: "Compared with SAP",
+    approve: "Approve", reject: "Reject", diffTitle: "Differences with SAP", diffSub: "From the {d} comparison. Explain each by {t}.",
+    rs_sap: "SAP late or wrong", rs_lsh_error: "LSH input error", rs_not_recorded: "Not recorded in LSH", rs_physical: "Missing or extra (count confirms)",
+    rso_sap: "Sales Admin posts or corrects", rso_lsh_error: "Ask a correction, OM approves", rso_not_recorded: "Record it with the document", rso_physical: "Recount, then Finance adjusts",
+    explained: "Explained", lsh: "LSH", sap: "SAP", diff: "Difference", area_gs: "Good", area_bs: "Bad", happenedAt: "Happened at (if earlier today)", negWarn: "Stock goes below zero for {c}. Saved anyway; it will show as a difference.",
+    offline: "No signal. Try again when you have signal.", language: "Bahasa Melayu", cannotUndo: "Can't undo", stockReset: "Stock reset by HQ", unsaved: "Not saved yet", discard: "Discard", continueEntry: "Continue"
+  },
+  ms: {
+    appName: "My Warehouse", whoAreYou: "Siapa anda?", tapName: "Tekan nama anda", pinFor: "PIN untuk {name}", forgotPin: "Lupa PIN? Tanya Ops Manager anda.",
+    wrongPin: "PIN salah. Tinggal {n} cubaan.", locked: "Dikunci sehingga {t}. Ops Manager boleh buka kunci.", setPin: "Pilih PIN anda sendiri", setPinSub: "{n} digit yang hanya anda tahu. Bukan 1234, bukan semua sama.",
+    repeatPin: "Masukkan sekali lagi", pinsDiffer: "Dua PIN tidak sama. Mula semula.", done: "Selesai", notMe: "Bukan saya", signedOutIdle: "Log keluar selepas 5 minit tidak digunakan. Tiada yang hilang.",
+    today: "Hari ini", stock: "Stok", count: "Kira", joinTake: "Sertai stock take", joinTakeSub: "Stock take bulanan dibuka di sini",
+    setupDevice: "Sediakan peranti ini", setupSub: "Ops Manager: masukkan kod plant gudang, kemudian log masuk. Peranti ini kekal untuk gudang ini.",
+    plantCode: "Kod plant", next: "Seterusnya", back: "Kembali", cancel: "Batal", save: "Simpan", saved: "Disimpan", close: "Tutup", yes: "Ya", no: "Tidak",
+    roles_lo: "Logistic Officer", roles_admin: "Warehouse Admin", roles_sup: "Penyelia", roles_om: "Ops Manager",
+    thingsToday: "{n} perkara untuk dibuat", oneThing: "1 perkara untuk dibuat", timeLeft: "{h} jam {m} minit lagi", late: "Lewat: melepasi masa tutup", nothingToday: "Tiada yang menunggu sekarang", inTimeOrder: "Ikut masa. Tekan satu untuk mula.",
+    dailyCount: "Kiraan harian", byTime: "sebelum {t}", skusToCount: "{n} SKU untuk dikira", recordMove: "Rekod pergerakan",
+    stgLate: "Staging menunggu terlalu lama", stgLateSub: "{n} invois di staging lebih 24 jam", failedWait: "Penghantaran gagal menunggu SAP", failedWaitSub: "{n} invois perlu reversal atau trip baru",
+    toApprove: "Pembetulan untuk diluluskan", toApproveSub: "{n} menunggu anda", diffs: "Terangkan perbezaan", diffsSub: "{n} SKU berbeza dengan SAP", closeDay: "Tutup hari", closeDaySub: "Tutup pada {t}",
+    dayClosed: "Hari ditutup {t}", doneToday: "Selesai hari ini", movesToday: "Pergerakan stok direkod", noLsh: "Rekod stok (LSH) belum dihidupkan untuk gudang ini.",
+    good: "Stok baik", staging: "Staging", bad: "Stok rosak", ctn: "ktn", cartons: "Karton", boxes: "Kotak", packs: "Pek", total: "Jumlah",
+    t_receive: "Barang diterima", t_invoice: "Invois ke staging", t_load: "Dimuat ke lori", t_fail_back: "Penghantaran gagal kembali", t_return: "Pulangan pelanggan",
+    t_to_bs: "Pindah ke stok rosak", t_transfer_out: "Pindahan keluar", t_reversal: "Reversal diposkan", t_redeliver: "Hantar semula", t_correction: "Pembetulan", t_reset: "Stok diset semula",
+    s_receive: "masuk → Stok baik", s_invoice: "Stok baik → Staging", s_load: "Staging → keluar", s_fail_back: "kembali → Staging", s_return: "masuk → Rosak atau Baik", s_to_bs: "Baik → Stok rosak", s_transfer_out: "Stok baik → keluar",
+    docNo: "Nombor dokumen", doc_receive: "Nombor DO atau GR", doc_invoice: "Nombor invois", doc_fail_back: "Nombor invois", doc_return: "Nombor pulangan atau CN", doc_to_bs: "Rujukan (pilihan)",
+    doc_transfer_out: "Nombor STO atau DO", doc_reversal: "Nombor invois", doc_redeliver: "Nombor invois", refNo: "Nombor reversal SAP", note: "Nota", noteOpt: "Nota (pilihan)",
+    addSku: "Tambah SKU", scan: "Imbas", search: "Cari nama atau kod", lines: "SKU dalam dokumen ini", noLines: "Belum ada SKU",
+    damaged: "Diterima rosak → stok rosak", goodCond: "Keadaan baik", badCond: "Keadaan rosak", check: "Semak, kemudian simpan", saveEntry: "Simpan",
+    why: "Kenapa ia kembali?", r_outlet_closed: "Kedai tutup", r_refused: "Ditolak / tiada bayaran", r_wrong_item: "Barang atau kuantiti salah", r_no_time: "Tidak sempat", r_other: "Lain-lain",
+    invoiceLines: "Apa yang kembali", maxOut: "maks {n}", nothingOut: "Tiada barang invois ini keluar dengan lori.", findInvoice: "Cari invois",
+    undo: "Batal", undone: "Dibatalkan", askFix: "Minta pembetulan", fixWhy: "Kenapa perlu dibetulkan?", fixSent: "Dihantar kepada Ops Manager",
+    entriesToday: "Rekod hari ini", seeAll: "Lihat semua", noEntries: "Belum ada rekod hari ini", by: "oleh {n}",
+    stagingTitle: "Staging", stagingSub: "Sudah diinvois dalam SAP, masih di gudang. Jangan kira kawasan ini.", waitingLoad: "Menunggu dimuat", cameBack: "Kembali, menunggu SAP",
+    loadSel: "Dimuat ke lori ({n})", tickInvoices: "Tandakan invois dalam lori ini", age: "{h} jam", ageDays: "{d} hari", waitingRev: "Menunggu reversal SAP",
+    closeTitle: "Tutup hari", closeWarn: "Amaran tidak menghalang penutupan. Ia kekal dalam rekod hari ini.", closeBtn: "Tutup dan kunci", closePin: "Masukkan PIN untuk tutup",
+    copyList: "Salin senarai untuk Sales Admin", copied: "Disalin. Tampal dalam WhatsApp.", closedOk: "Hari ditutup. Terima kasih!", closingStock: "Stok penutup", comparedSap: "Dibanding dengan SAP",
+    approve: "Lulus", reject: "Tolak", diffTitle: "Perbezaan dengan SAP", diffSub: "Dari perbandingan {d}. Terangkan setiap satu sebelum {t}.",
+    rs_sap: "SAP lewat atau salah", rs_lsh_error: "Salah masuk LSH", rs_not_recorded: "Tidak direkod dalam LSH", rs_physical: "Kurang atau lebih (kiraan sahkan)",
+    rso_sap: "Sales Admin poskan atau betulkan", rso_lsh_error: "Minta pembetulan, OM luluskan", rso_not_recorded: "Rekod dengan dokumen", rso_physical: "Kira semula, Finance laraskan",
+    explained: "Diterangkan", lsh: "LSH", sap: "SAP", diff: "Beza", area_gs: "Baik", area_bs: "Rosak", happenedAt: "Berlaku pada (jika lebih awal hari ini)", negWarn: "Stok jadi bawah sifar untuk {c}. Tetap disimpan; ia akan tunjuk sebagai perbezaan.",
+    offline: "Tiada isyarat. Cuba lagi bila ada isyarat.", language: "English", cannotUndo: "Tidak boleh batal", stockReset: "Stok diset semula oleh HQ", unsaved: "Belum disimpan", discard: "Buang", continueEntry: "Teruskan"
+  }
+};
+
+export function lang() { return (S.wh && S.wh.lang) || "en"; }
+export function t(k, v) {
+  var s = (W[lang()] && W[lang()][k]) || W.en[k] || k;
+  if (v) Object.keys(v).forEach(function (x) { s = s.split("{" + x + "}").join(v[x]); });
+  return s;
+}

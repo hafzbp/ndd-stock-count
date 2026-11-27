@@ -215,7 +215,7 @@ export function renderSetup(app) {
 
   /* owner only */
   if (!isOwner()) { app.append(el("p", { class: "small muted center", text: "Passwords and backup are managed by the owner." })); return; }
-  var title = el("input", { type: "text", value: st.title || "NDD Stock Count", style: "max-width:320px" });
+  var title = el("input", { type: "text", value: st.title || "My Warehouse", style: "max-width:320px" });
   app.append(el("div", { class: "card" }, el("h3", { text: "App name" }), el("div", { class: "row" }, title, el("button", { class: "btn primary", text: "Save", onclick: function () { var v = title.value.trim(); if (!v) return; call("admin_settings", { p_patch: { title: v } }, "Name saved."); } }))));
 
   var fp = el("input", { type: "text", placeholder: A.financeReady ? "•••••• (set - type a new one to change)" : "not set", style: "max-width:260px", autocomplete: "off" });

@@ -4,22 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#B5121B">
-<title>NDD Stock Count</title>
+<title>My Warehouse</title>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
 <link rel="apple-touch-icon" href="assets/apple-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="css/app.css?v=2.17.0">
+<link rel="stylesheet" href="css/app.css?v=2.18.0">
 </head>
 <body>
 <header>
   <img src="assets/logo.png" alt="Nabati" class="logo">
-  <div class="ttl"><h1 id="title">NDD Stock Count</h1><div class="by">Built by TaskForce Team 🐯</div><div class="sub" id="sub">Loading…</div></div>
+  <div class="ttl"><h1 id="title">My Warehouse</h1><div class="by">Built by TaskForce Team 🐯</div><div class="sub" id="sub">Loading…</div></div>
   <div class="sp"></div>
   <span class="pill" id="pill">-</span>
   <a id="dashBtn" class="btn hbtn" style="color:inherit;text-decoration:none" href="dashboard/" target="_blank" rel="noopener" title="Live progress of all warehouses"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-4"/></svg><span class="lbl"> Dashboard</span></a>
-  <button id="lockBtn" class="btn hbtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg><span class="lbl"> Admin</span></button>
+  <button id="lockBtn" class="btn hbtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg><span class="lbl"> HQ</span></button>
 </header>
 <nav class="tabs hidden" id="tabs"></nav>
 <main id="app"><div class="center muted">Loading…</div></main>
@@ -29,7 +29,7 @@
 <script>
 /* New version? Re-download every file first, so the phone never mixes old and new code (GitHub Pages lets browsers cache files ~10 min). */
 (function () {
-  var FILES = ["js/api.js", "js/app.js", "js/config.js", "js/count.js", "js/daily.js", "js/dcc.js", "js/export.js", "js/home.js", "js/hqdash.js", "js/hqreset.js", "js/kpi.js", "js/master.js", "js/mdash.js", "js/signed.js", "js/mres.js", "js/importprev.js", "js/photos.js", "js/pure.js", "js/scan.js", "js/setup.js", "js/state.js", "js/sup.js", "js/today.js", "js/ui.js", "css/app.css"], KEY = "ndd2-ver";
+  var FILES = ["js/api.js", "js/app.js", "js/config.js", "js/count.js", "js/daily.js", "js/dcc.js", "js/export.js", "js/home.js", "js/hqdash.js", "js/hqreset.js", "js/kpi.js", "js/master.js", "js/mdash.js", "js/signed.js", "js/mres.js", "js/importprev.js", "js/photos.js", "js/pure.js", "js/scan.js", "js/setup.js", "js/state.js", "js/sup.js", "js/today.js", "js/ui.js", "js/i18n.js", "js/wh.js", "js/lsh.js", "js/whadmin.js", "css/app.css"], KEY = "ndd2-ver";
   function go() { var s = document.createElement("script"); s.type = "module"; s.src = "js/app.js"; document.body.appendChild(s); }
   fetch("js/config.js?t=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : ""; }).then(function (t) {
     var m = /APP_VERSION = "([^"]+)"/.exec(t), v = m && m[1], old = null; try { old = localStorage.getItem(KEY); } catch (e) { }
