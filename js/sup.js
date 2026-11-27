@@ -18,6 +18,11 @@ export function supLogin() {
       err.textContent = "";
       try {
         var r = await rpc("sup_login", { p_code: pc.value.trim(), p_pin: pin.value.trim() });
+        if (r.people) {
+          err.textContent = r.branch + " now signs in with name and PIN on the warehouse device. Tap your name there.";
+          if (hooks.whSetup) err.append(" ", el("a", { href: "#", text: "Ops Manager: set up this device", onclick: function (ev) { ev.preventDefault(); closeModal(); hooks.whSetup(pc.value.trim()); } }));
+          return;
+        }
         if (!r.ok) { err.textContent = "Wrong plant code or PIN."; return; }
         S.sup = { token: r.token, branch: r.branch }; saveSup(); closeModal();
         if (r.mustChange) changePin(true); else { S.tab = "sup"; S.supDay = null; hooks.render(); }
