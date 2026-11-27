@@ -1,5 +1,5 @@
-/* HQ side of My Warehouse: Stock (LSH vs SAP, staging, opening stock), People & devices (login per NDD, people,
-   PINs, devices, LSH on/off) and HQ accounts (superadmin). */
+/* HQ side of My Warehouse: Stock (LSH vs SAP, staging, opening stock), People (login per NDD, people,
+   PINs, LSH on/off) and HQ accounts (superadmin). */
 import { S, hooks } from "./state.js";
 import { rpc } from "./api.js";
 import { el, msg, toast, errText, openModal, closeModal, confirmBox } from "./ui.js";
@@ -45,7 +45,7 @@ export function renderHqStock(app) {
   if (!L) { app.append(el("p", { class: "center muted", text: "Loading…" })); load("lsh", function () { return rpc("admin_lsh", { p_token: tok() }); }); return; }
   if (L.error) { app.append(el("div", { class: "card", text: L.error })); return; }
   var on = (L.branches || []).filter(function (b) { return b.lsh; });
-  if (!on.length) { app.append(el("div", { class: "card" }, el("h3", { text: "Stock (LSH) is not on for any warehouse" }), el("p", { class: "muted", text: "Switch it on per NDD in Setup → People & devices. It needs the name and PIN login." }))); return; }
+  if (!on.length) { app.append(el("div", { class: "card" }, el("h3", { text: "Stock (LSH) is not on for any warehouse" }), el("p", { class: "muted", text: "Switch it on per NDD in Setup → People. It needs the username and PIN login." }))); return; }
   var br = h.stBr && on.some(function (b) { return b.branch === h.stBr; }) ? h.stBr : on[0].branch; h.stBr = br;
   var b = on.find(function (x) { return x.branch === br; });
   var view = h.stView || "recon";
@@ -148,28 +148,27 @@ function openingView(app, b, L) {
   app.append(c);
 }
 
-/* ---------- Setup → People & devices ---------- */
+/* ---------- Setup → People ---------- */
 export function renderPeopleAdmin(app) {
   var h = H(), L = h.lsh;
   if (!L) { app.append(el("p", { class: "center muted", text: "Loading…" })); load("lsh", function () { return rpc("admin_lsh", { p_token: tok() }); }); return; }
   if (L.error) { app.append(el("div", { class: "card", text: L.error })); return; }
-  app.append(el("div", { class: "banner", text: "Warehouses on “Name and PIN” sign in on a set-up warehouse device; the others keep the plant code. Stock (LSH) needs Name and PIN." }));
+  app.append(el("div", { class: "banner", text: "Warehouses on “Username and PIN” log in on the first page with their own username; the others keep the plant code. Stock (LSH) needs Username and PIN." }));
   var tb = el("table", { class: "tbl" });
-  tb.append(el("thead", {}, el("tr", {}, ["Warehouse", "Login", "Stock (LSH)", "Cut-off", "People", "Devices", ""].map(function (x) { return el("th", { text: x }); }))));
+  tb.append(el("thead", {}, el("tr", {}, ["Warehouse", "Login", "Stock (LSH)", "Cut-off", "People", ""].map(function (x) { return el("th", { text: x }); }))));
   var body = el("tbody");
   (L.branches || []).forEach(function (b) {
-    var mode = el("select", { "aria-label": "Login " + b.branch }, [["plant", "Plant code"], ["people", "Name and PIN"]].map(function (o) { return el("option", { value: o[0], text: o[1], selected: b.loginMode === o[0] }); }));
+    var mode = el("select", { "aria-label": "Login " + b.branch }, [["plant", "Plant code"], ["people", "Username and PIN"]].map(function (o) { return el("option", { value: o[0], text: o[1], selected: b.loginMode === o[0] }); }));
     var lsh = el("input", { type: "checkbox", checked: b.lsh, "aria-label": "LSH " + b.branch });
     var cut = el("input", { type: "time", value: b.cutoff || "16:00", style: "width:140px" });
     body.append(el("tr", {}, el("td", {}, el("b", { text: b.branch }), el("div", { class: "small muted", text: b.plant || "" })), el("td", {}, mode), el("td", {}, lsh), el("td", {}, cut),
-      el("td", {}, el("button", { class: "link", text: String(b.people), onclick: function () { h.pBr = b.branch; h.people = null; hooks.render(); } })), el("td", { class: "num", text: String(b.devices) }),
+      el("td", {}, el("button", { class: "link", text: String(b.people), onclick: function () { h.pBr = b.branch; h.people = null; hooks.render(); } })),
       el("td", {}, el("button", { class: "btn", style: "min-height:34px;padding:4px 10px", text: "Save", onclick: async function () {
         try { await rpc("admin_lsh_branch", { p_token: tok(), p_branch: b.branch, p_login_mode: mode.value, p_lsh: lsh.checked, p_cutoff: cut.value }); h.lsh = null; toast("Saved"); hooks.render(); } catch (e) { msg("Can't save", errText(e)); }
       } }))));
   });
   tb.append(body); app.append(el("div", { class: "card", style: "overflow-x:auto;padding:0" }, tb));
   peopleCard(app);
-  devicesCard(app);
 }
 function peopleCard(app) {
   var h = H(), all = h.lsh.branches || [], names = all.map(function (b) { return b.branch; });
@@ -181,54 +180,43 @@ function peopleCard(app) {
   if (!h.people || h.people.br !== br) { c.append(el("p", { class: "muted", text: "Loading…" })); app.append(c); load("people", async function () { var x = await rpc("wh_people", { p_token: tok(), p_branch: br }); return { br: br, list: x }; }); return; }
   if (h.people.error) { c.append(el("p", { text: h.people.error })); app.append(c); return; }
   var tb = el("table", { class: "tbl" });
-  tb.append(el("thead", {}, el("tr", {}, ["Name", "Roles", "PIN", ""].map(function (x) { return el("th", { text: x }); }))));
+  tb.append(el("thead", {}, el("tr", {}, ["Name", "Username", "Roles", "PIN", ""].map(function (x) { return el("th", { text: x }); }))));
   var body = el("tbody");
   h.people.list.forEach(function (p) {
-    body.append(el("tr", { style: p.active ? "" : "opacity:.5" }, el("td", {}, el("b", { text: p.name }), p.active ? null : el("div", { class: "small", text: "switched off" })),
+    body.append(el("tr", { style: p.active ? "" : "opacity:.5" }, el("td", {}, el("b", { text: p.name }), p.active ? null : el("div", { class: "small", text: "switched off" })), el("td", { style: "font-family:ui-monospace,monospace", text: p.username || "" }),
       el("td", { class: "small", text: p.roles.map(function (r) { return (ROLES.find(function (x) { return x[0] === r; }) || [r, r])[1]; }).join(", ") + (p.actingOmUntil ? " · acting OM until " + p.actingOmUntil : "") }),
       el("td", {}, p.locked ? pill("Locked", "bad") : p.pinSet ? pill("Set", "ok") : pill("Temporary", "warn")),
       el("td", { class: "row", style: "gap:6px;flex-wrap:wrap" },
         el("button", { class: "btn", style: "min-height:34px;padding:4px 10px", text: "Edit", onclick: function () { personSheet(br, p); } }),
-        el("button", { class: "btn", style: "min-height:34px;padding:4px 10px", text: "Reset PIN", onclick: function () { confirmBox("Reset " + p.name + "'s PIN?", "They get a temporary PIN and choose their own at the next sign-in.", "Reset", async function () { try { var r = await rpc("wh_person_reset", { p_token: tok(), p_id: p.id }); msg("Temporary PIN for " + r.name, r.tempPin + "\n\nGive it to " + r.name + " in person. It works once."); h.people = null; hooks.render(); } catch (e) { msg("Can't reset", errText(e)); } }); } }),
+        el("button", { class: "btn", style: "min-height:34px;padding:4px 10px", text: "Reset PIN", onclick: function () { confirmBox("Reset " + p.name + "'s PIN?", "They get a temporary PIN and choose their own at the next sign-in.", "Reset", async function () { try { var r = await rpc("wh_person_reset", { p_token: tok(), p_id: p.id }); msg("Temporary PIN for " + r.name, "Username: " + r.username + "\nPIN: " + r.tempPin + "\n\nGive it to " + r.name + " in person. It works once."); h.people = null; hooks.render(); } catch (e) { msg("Can't reset", errText(e)); } }); } }),
         p.locked ? el("button", { class: "btn", style: "min-height:34px;padding:4px 10px", text: "Unlock", onclick: async function () { try { await rpc("wh_person_unlock", { p_token: tok(), p_id: p.id }); h.people = null; hooks.render(); } catch (e) { msg("Can't unlock", errText(e)); } } }) : null)));
   });
-  if (!h.people.list.length) body.append(el("tr", {}, el("td", { colspan: "4", class: "muted", text: "Nobody yet. Add the Ops Manager first: they set up the warehouse device." })));
+  if (!h.people.list.length) body.append(el("tr", {}, el("td", { colspan: "5", class: "muted", text: "Nobody yet. Add the Ops Manager first; they can then add their team." })));
   tb.append(body); c.append(el("div", { style: "overflow-x:auto" }, tb)); app.append(c);
 }
 function personSheet(br, p) {
   openModal(function (sh) {
     var n = el("input", { value: p ? p.name : "", placeholder: "Name as people call them, e.g. Ravi K." }), roles = {}, err = el("div", { class: "small", style: "color:var(--bad);min-height:18px" });
+    var un = el("input", { value: p ? p.username : "", placeholder: "Username (empty: made from the name, e.g. ravi." + (plantOf(br) || "1503") + ")", autocapitalize: "none", autocorrect: "off", spellcheck: "false" });
     (p ? p.roles : []).forEach(function (r) { roles[r] = 1; });
     var g = el("div", { class: "wh-reasons", style: "margin-top:8px" });
     ROLES.forEach(function (r) { var b = el("button", { class: "big" + (roles[r[0]] ? " on" : ""), text: r[1], onclick: function () { if (roles[r[0]]) delete roles[r[0]]; else roles[r[0]] = 1; b.classList.toggle("on"); } }); g.append(b); });
     var act = el("input", { type: "checkbox", checked: p ? p.active : true }), until = el("input", { type: "date", value: p && p.actingOmUntil || "" });
-    sh.append(el("h3", { text: p ? "Edit " + p.name : "Add a person · " + br }), n, g,
+    sh.append(el("h3", { text: p ? "Edit " + p.name : "Add a person · " + br }), n, el("div", { style: "height:8px" }), un, g,
       el("label", { class: "row", style: "gap:8px;margin-top:10px" }, act, el("span", { text: "Active (can sign in)" })),
       el("label", { class: "small muted", style: "display:block;margin-top:10px" }, "Acting Ops Manager until (optional, e.g. while the OM is on leave)", until), err,
       el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn", style: "flex:1", text: "Cancel", onclick: closeModal }),
         el("button", { class: "btn primary", style: "flex:2", text: "Save", onclick: async function () {
           try {
-            var r = await rpc("wh_person_save", { p_token: tok(), p_branch: br, p_id: p ? p.id : null, p_name: n.value, p_roles: Object.keys(roles), p_active: act.checked, p_acting_om_until: until.value || null });
+            var r = await rpc("wh_person_save", { p_token: tok(), p_branch: br, p_id: p ? p.id : null, p_name: n.value, p_username: un.value, p_roles: Object.keys(roles), p_active: act.checked, p_acting_om_until: until.value || null });
             closeModal(); H().people = null; H().lsh = null; hooks.render();
-            if (r.tempPin) msg("Temporary PIN for " + r.name, r.tempPin + "\n\nGive it to " + r.name + " in person. At the first sign-in they choose their own PIN.");
+            if (r.tempPin) msg("Login for " + r.name, "Username: " + r.username + "\nTemporary PIN: " + r.tempPin + "\n\nGive it to " + r.name + " in person. At the first login they choose their own 6-digit PIN.");
             else toast("Saved");
           } catch (e) { err.textContent = errText(e); }
         } })));
   });
 }
-function devicesCard(app) {
-  var h = H(), D = h.devices;
-  var c = el("div", { class: "card" }, el("h3", { text: "Warehouse devices" }), el("p", { class: "small muted", text: "Each device was set up by an Ops Manager with the plant code and their PIN. Remove a lost or broken one: it signs out at once." }));
-  if (!D) { c.append(el("p", { class: "muted", text: "Loading…" })); app.append(c); load("devices", function () { return rpc("admin_devices", { p_token: tok() }); }); return; }
-  if (D.error) { c.append(el("p", { text: D.error })); app.append(c); return; }
-  if (!D.length) c.append(el("p", { class: "muted", text: "No devices yet." }));
-  D.forEach(function (d) {
-    c.append(el("div", { class: "row", style: "justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);gap:8px;flex-wrap:wrap" },
-      el("div", {}, el("b", { text: d.branch + " · " + d.label }), el("div", { class: "small muted", text: "Set up " + hhmm(d.createdAt) + (d.setUpBy ? " by " + d.setUpBy : "") + " · last used " + (d.lastSeen ? hhmm(d.lastSeen) : "never") })),
-      el("button", { class: "btn", text: "Remove", onclick: function () { confirmBox("Remove " + d.label + "?", "Anyone signed in on it is signed out. The Ops Manager can set it up again with the plant code.", "Remove", async function () { try { await rpc("admin_device_revoke", { p_token: tok(), p_id: d.id }); h.devices = null; h.lsh = null; hooks.render(); } catch (e) { msg("Can't remove", errText(e)); } }); } })));
-  });
-  app.append(c);
-}
+function plantOf(br) { var b = ((H().lsh || {}).branches || []).find(function (x) { return x.branch === br; }); return b && b.plant; }
 
 /* ---------- Setup → HQ accounts ---------- */
 export function renderHqAccounts(app) {

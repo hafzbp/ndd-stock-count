@@ -1,15 +1,16 @@
-/* My Warehouse on the shared warehouse device: set the device up once for an NDD, then each person taps their
-   name and enters their PIN. Today shows only the tasks of their roles; Stock is LSH; Count is the daily count.
-   Done (or 5 minutes without use) goes back to the people screen; nothing typed is lost. */
+/* My Warehouse for the people of an NDD: one login page for everyone (username + 6-digit PIN; HQ uses email +
+   password on the same page). Today shows only the tasks of their roles; Stock is LSH; Count is the daily count.
+   Done (or 5 minutes without use) logs out; the phone remembers the last username so only the PIN is needed. */
 import { S, hooks, saveTokens, flush, store, backup, cur } from "./state.js";
 import { rpc } from "./api.js";
-import { el, msg, toast, errText, openModal, closeModal, confirmBox } from "./ui.js";
-import { loadMaster, loadBranch, renderCount, timeLeft, svg, ICON } from "./count.js";
+import { el, msg, toast, errText, closeModal } from "./ui.js";
+import { loadMaster, loadBranch, renderCount, svg, ICON } from "./count.js";
 import { renderSup } from "./sup.js";
 import { t } from "./i18n.js";
-import { renderStock, loadLsh, ctnOf, fmtCtn } from "./lsh.js";
+import { APP_VERSION } from "./config.js";
+import { renderStock, loadLsh } from "./lsh.js";
 
-var IDLE_MS = 5 * 60 * 1000;
+var IDLE_MS = 5 * 60 * 1000, PIN_N = 6;
 export var WH_ICON = {
   box: '<path d="M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/>',
   count: '<path d="M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>',
@@ -22,43 +23,49 @@ export var WH_ICON = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'
 };
 
-export function whEnrolled() { return !!(S.wh && S.wh.key); }
-export function whMode() { return whEnrolled() && !(S.admin && S.admin.token); }
+/* signed in (or choosing a first PIN, or counting a stock take opened by a staff member) */
 export function whIn() { return !!(S.wh && (S.wh.person || S.wh.joined)); }
+export function whMode() { return !!(S.wh && (whIn() || S.wh.pin)) && !(S.admin && S.admin.token); }
 export function has(r) { var p = S.wh && S.wh.person; return !!p && (p.roles || []).some(function (x) { return r.indexOf(x) >= 0; }); }
 
 export function initWH() {
-  var d = store("mw-device"); S.wh = d && d.key ? Object.assign({ tab: "today", view: "" }, d) : { tab: "today", view: "" };
-  S.wh.lang = store("mw-lang") || "en";
+  S.wh = { tab: "today", view: "", lang: store("mw-lang") || "en", user: store("mw-user") || null, login: {} };
+  store("mw-device", null);   /* the device set-up of 2.18.0 is retired */
   var s = store("mw-sess");
-  if (d && s && s.token && Date.now() - (s.at || 0) < IDLE_MS) {
-    S.wh.person = s.person; S.wh.token = s.token; S.wh.lang = s.person.lang; S.wh.lastAct = s.at; S.wh.tab = s.tab || "today";
-    S.tokens[d.branch] = s.token; if (has(["sup", "om"])) S.sup = { token: s.token, branch: d.branch, wh: true };
-  } else if (s) { store("mw-sess", null); if (d && S.tokens[d.branch] === (s && s.token)) { delete S.tokens[d.branch]; saveTokens(); } }
+  if (s && s.token && s.branch && s.person && Date.now() - (s.at || 0) < IDLE_MS) {
+    S.wh.person = s.person; S.wh.token = s.token; S.wh.branch = s.branch; S.wh.lang = s.person.lang || S.wh.lang; S.wh.lastAct = s.at; S.wh.tab = s.tab || "today";
+    S.tokens[s.branch] = s.token; if (has(["sup", "om"])) S.sup = { token: s.token, branch: s.branch, wh: true };
+  } else if (s) { store("mw-sess", null); if (s.branch && S.tokens[s.branch] === s.token) { delete S.tokens[s.branch]; saveTokens(); } }
   ["pointerdown", "keydown"].forEach(function (ev) { document.addEventListener(ev, touchAct, true); });
   setInterval(function () { if (S.wh && S.wh.person && Date.now() - (S.wh.lastAct || 0) > IDLE_MS) signOut("idle"); }, 15000);
 }
 function touchAct() { if (!S.wh || !S.wh.person) return; S.wh.lastAct = Date.now(); saveSess(); }
-function saveSess() { if (S.wh.person) store("mw-sess", { token: S.wh.token, person: S.wh.person, at: S.wh.lastAct || Date.now(), tab: S.wh.tab }); else store("mw-sess", null); }
+function saveSess() { if (S.wh.person) store("mw-sess", { token: S.wh.token, person: S.wh.person, branch: S.wh.branch, at: S.wh.lastAct || Date.now(), tab: S.wh.tab }); else store("mw-sess", null); }
 
+/* end the person's session without drawing (used by sign-out and by opening a stock take for helpers) */
+async function endPerson() {
+  var w = S.wh, tok = w.token;
+  try { await flush(); } catch (e) { }
+  if (S.tokens[w.branch] === tok) { delete S.tokens[w.branch]; saveTokens(); }
+  if (S.sup && S.sup.wh) S.sup = null;
+  S.mine.active = null; S.start = null; S.step = ""; backup();
+  w.person = null; w.token = null; w.lsh = null; w.me = null; w.tab = "today"; w.view = ""; w.pin = null; saveSess();
+  if (tok) rpc("logout", { p_token: tok }).catch(function () { });
+}
 export async function signOut(why) {
   var w = S.wh; if (!w) return;
   if (w.joined) {
     var jt = w.joinTok; w.joined = false; w.joinTok = null;
     try { await flush(); } catch (e) { }
     if (S.tokens[w.branch] === jt) { delete S.tokens[w.branch]; saveTokens(); }
-    S.mine.active = null; S.start = null; S.step = ""; backup();
+    S.mine.active = null; S.start = { step: "code" }; S.step = ""; backup();
     if (jt) rpc("logout", { p_token: jt }).catch(function () { });
     hooks.render(); return;
   }
-  if (!w.person) return;
-  var tok = w.token;
-  try { await flush(); } catch (e) { }
-  if (S.tokens[w.branch] === tok) { delete S.tokens[w.branch]; saveTokens(); }
-  if (S.sup && S.sup.wh) S.sup = null;
-  S.mine.active = null; S.start = null; S.step = ""; backup();
-  w.person = null; w.token = null; w.lsh = null; w.tab = "today"; w.view = ""; w.pin = null; saveSess();
-  if (tok) rpc("logout", { p_token: tok }).catch(function () { });
+  if (!w.person && !w.pin) return;
+  if (w.pin && w.pin.token) rpc("logout", { p_token: w.pin.token }).catch(function () { });
+  await endPerson();
+  S.start = { step: "code" }; S.plantPad = false; w.login = {};
   closeModal(); document.body.classList.remove("noscroll");
   var x = document.getElementById("skuv"); if (x) x.remove();
   hooks.render(); window.scrollTo(0, 0);
@@ -66,7 +73,6 @@ export async function signOut(why) {
 }
 
 function hhmm(ts) { return ts ? new Date(ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" }) : ""; }
-function roleTxt(p) { return (p.roles || []).map(function (r) { return t("roles_" + r); }).join(" · "); }
 function initials(n) { return String(n || "?").split(/\s+/).map(function (x) { return x[0]; }).join("").slice(0, 2).toUpperCase(); }
 
 /* ---------- header tabs (app.js draws them) ---------- */
@@ -81,7 +87,7 @@ export function whSub() {
   var w = S.wh; if (!w) return "";
   if (w.person) return w.branch + " · " + w.person.name;
   if (w.joined) return w.branch + " · " + t("joinTake");
-  return w.branch + " · " + (w.label || "");
+  return w.branch || "";
 }
 export function whGo(tab) { S.wh.tab = tab; S.wh.view = ""; S.wh.lsh = null; saveSess(); if (tab === "count") prepCount(); hooks.render(); window.scrollTo(0, 0); }
 hooks.whHome = function () { whGo("today"); };
@@ -91,7 +97,7 @@ hooks.whSignOut = function () { signOut(); };
 export function renderWH(app) {
   var w = S.wh;
   if (w.joined) { renderCount(app); return; }
-  if (!w.person) { if (w.pin) renderPin(app); else renderPeople(app); return; }
+  if (!w.person) { if (w.pin) renderPin(app); return; }
   if (w.tab === "stock" && has(["lo", "om"])) { renderStock(app); return; }
   if (w.tab === "count" && has(["admin", "sup", "om"])) {
     if (w.view === "sup" && S.sup) { app.append(backRow(function () { w.view = ""; hooks.render(); })); renderSup(app); return; }
@@ -103,91 +109,121 @@ export function renderWH(app) {
 }
 export function backRow(fn, label) { return el("div", { class: "rhead" }, el("button", { class: "iconbtn", "aria-label": t("back"), onclick: fn }, svg(ICON.back, 22)), el("div", { class: "rt", text: label || "" })); }
 
-/* ---------- people screen ---------- */
-async function loadInfo() {
-  try { S.wh.info = await rpc("device_info", { p_key: S.wh.key }); S.wh.err = null; S.wh.branch = S.wh.info.branch; }
-  catch (e) {
-    if (e.code === "AUTH") { store("mw-device", null); store("mw-sess", null); S.wh = { tab: "today", view: "" }; msg(t("setupDevice"), errText(e)); }
-    else S.wh.err = e.code === "OFFLINE" ? t("offline") : errText(e);
-  }
-  hooks.render();
+/* ---------- the first page: log in ---------- */
+function langBtn() {
+  var w = S.wh;
+  return el("button", { class: "btn", style: "min-height:36px;padding:4px 12px", text: t("language"), onclick: function () { w.lang = w.lang === "ms" ? "en" : "ms"; w.langPicked = true; store("mw-lang", w.lang); hooks.render(); } });
 }
-function renderPeople(app) {
-  var w = S.wh, info = w.info;
-  if (!info && !w.loading) { w.loading = true; loadInfo().finally(function () { w.loading = false; }); }
-  var head = el("div", { class: "wh-ppl-head" }, el("div", {}, el("h2", { style: "margin:0", text: t("whoAreYou") }), el("div", { class: "muted small", text: t("tapName") })),
-    el("button", { class: "btn", text: t("language"), onclick: function () { w.lang = w.lang === "ms" ? "en" : "ms"; w.langPicked = true; store("mw-lang", w.lang); hooks.render(); } }));
-  app.append(head);
-  if (w.err) app.append(el("div", { class: "card", style: "color:var(--bad)", text: w.err }));
-  if (!info) { app.append(el("div", { class: "center muted", text: "…" })); return; }
-  if (info.stockTake) app.append(el("button", { class: "wh-task", style: "margin-bottom:12px;width:100%", onclick: joinTake },
-    el("span", { class: "wh-ic", style: "background:var(--infobg);color:var(--info)" }, svg(WH_ICON.count, 22)),
-    el("span", { class: "wh-tx" }, el("b", { text: t("joinTake") }), el("span", { class: "small muted", text: info.stockTake.name + " · " + t("joinTakeSub") })), svg(ICON.next, 18)));
-  var g = el("div", { class: "wh-people" });
-  (info.people || []).forEach(function (p) {
-    g.append(el("button", { class: "wh-person" + (p.locked ? " locked" : ""), onclick: function () { w.pin = { person: p, v: "", step: "pin" }; if (!w.langPicked) w.lang = p.lang || w.lang; hooks.render(); } },
-      el("span", { class: "wh-av", text: initials(p.name) }), el("b", { text: p.name }), el("span", { class: "small muted", text: roleTxt(p) }),
-      p.locked ? el("span", { class: "small", style: "color:var(--bad);font-weight:700", text: "🔒" }) : null));
-  });
-  if (!(info.people || []).length) app.append(el("div", { class: "card muted", text: "No people yet. HQ or the Ops Manager adds them in Setup." }));
-  app.append(g, el("p", { class: "center small muted", style: "margin-top:18px", text: info.branch + " · " + (info.label || "") }));
+export function renderLogin(app) {
+  var w = S.wh, L = w.login || (w.login = {}), u = w.user;
+  var wrap = el("div", { class: "cstart wh-login" });
+  wrap.append(el("div", { class: "row", style: "justify-content:space-between;align-items:center;gap:8px" }, el("h2", { style: "margin:0", text: t("login") }), langBtn()));
+  var card = el("div", { class: "card" });
+  var err = el("div", { class: "wh-pinerr", role: "alert", text: L.err || "" });
+  if (u && !L.other) {
+    /* this phone remembers the last person: only the PIN */
+    card.append(el("div", { class: "wh-pinbox", style: "padding:4px 0" },
+      el("span", { class: "wh-av big", text: initials(u.name) }), el("h2", { style: "margin:6px 0 2px", text: t("hi", { name: u.name }) }),
+      el("div", { class: "small muted", text: u.username + " · " + t("enterPin") })));
+    var v = L.pin || "", dots = el("div", { class: "wh-dots", "aria-label": v.length + " of " + PIN_N });
+    for (var i = 0; i < PIN_N; i++) dots.append(el("span", { class: i < v.length ? "on" : "" }));
+    var pad = el("div", { class: "pad wh-pad" });
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].forEach(function (k) {
+      if (!k) { pad.append(el("span")); return; }
+      pad.append(el("button", { text: k, "aria-label": k === "⌫" ? "Delete" : k, disabled: L.busy, onclick: function () {
+        var x = L.pin || ""; if (k === "⌫") x = x.slice(0, -1); else if (x.length < PIN_N) x += k;
+        L.pin = x; L.err = ""; hooks.render();
+        if (x.length === PIN_N) doLogin(u.username, x);
+      } }));
+    });
+    card.append(dots, err, pad, el("p", { class: "center", style: "margin:14px 0 0" },
+      el("button", { class: "link strong", text: t("otherUser", { name: u.name.split(" ")[0] }), onclick: function () { L.other = true; L.pin = ""; L.err = ""; L.u = ""; hooks.render(); } })),
+      el("p", { class: "small muted center", style: "margin:8px 0 0", text: t("forgotPin") }));
+  } else {
+    card.append(el("p", { class: "small muted", style: "margin-top:0", text: t("loginSub") }));
+    var ui = el("input", { value: L.u || "", placeholder: t("username"), autocomplete: "username", autocapitalize: "none", autocorrect: "off", spellcheck: "false", "aria-label": t("username") });
+    var hq = (L.u || "").indexOf("@") >= 0;
+    var pw = el("input", { type: "password", value: L.pw || "", placeholder: hq ? t("password") : t("pinOrPw"), autocomplete: "current-password", inputmode: hq ? "text" : "numeric", "aria-label": t("password") });
+    ui.addEventListener("input", function () {
+      L.u = ui.value; var h = ui.value.indexOf("@") >= 0;
+      pw.setAttribute("inputmode", h ? "text" : "numeric"); pw.placeholder = h ? t("password") : t("pinOrPw");
+    });
+    pw.addEventListener("input", function () { L.pw = pw.value; });
+    function go() { L.u = ui.value.trim(); L.pw = pw.value; if (!L.u || !L.pw) { L.err = t("wrongLogin"); hooks.render(); return; } doLogin(L.u, L.pw); }
+    [ui, pw].forEach(function (x) { x.addEventListener("keydown", function (e) { if (e.key === "Enter") { if (x === ui) pw.focus(); else go(); } }); });
+    card.append(ui, el("div", { style: "height:8px" }), pw, err,
+      el("button", { class: "btn primary block big1", style: "margin-top:10px", text: L.busy ? "…" : t("login"), disabled: L.busy, onclick: go }),
+      el("p", { class: "small muted center", style: "margin:10px 0 0", text: t("noUser") }));
+    if (u) card.append(el("p", { class: "center", style: "margin:8px 0 0" }, el("button", { class: "link", text: t("back"), onclick: function () { L.other = false; L.err = ""; hooks.render(); } })));
+    setTimeout(function () { if (document.activeElement === document.body) (L.u ? pw : ui).focus(); }, 60);
+  }
+  wrap.append(card,
+    el("p", { class: "center", style: "margin-top:16px" }, el("button", { class: "link strong", text: t("usePlant"), onclick: function () { S.plantPad = true; store("mw-plant", 1); hooks.render(); window.scrollTo(0, 0); } })),
+    el("p", { class: "center small muted", style: "margin-top:18px", text: "Version " + APP_VERSION }));
+  app.append(wrap);
+}
+hooks.renderLogin = renderLogin;
+
+async function doLogin(user, pass) {
+  var w = S.wh, L = w.login;
+  L.busy = true; L.err = ""; hooks.render();
+  try {
+    if (user.indexOf("@") >= 0) {
+      var h = await hooks.hqSignIn(user, pass);
+      L.busy = false; L.pin = "";
+      if (!h.ok) { L.err = h.err; L.pw = ""; hooks.render(); return; }
+      w.login = {}; return;
+    }
+    var r = await rpc("user_login", { p_user: user, p_pin: pass });
+    L.busy = false; L.pin = ""; L.pw = "";
+    if (!r.ok) {
+      L.err = r.plant ? t("plantStill", { b: r.branch }) : r.lockedUntil ? t("locked", { t: hhmm(r.lockedUntil) }) : r.left != null ? t("wrongPin", { n: r.left }) : t("wrongLogin");
+      hooks.render(); return;
+    }
+    w.branch = r.branch;
+    if (r.mustChange) { w.pin = { step: "new", person: r.person, token: r.token, res: r, v: "" }; w.login = {}; hooks.render(); window.scrollTo(0, 0); return; }
+    w.login = {}; startSession(r);
+  } catch (e) { L.busy = false; L.pin = ""; L.err = e.code === "OFFLINE" ? t("offline") : errText(e); hooks.render(); }
 }
 
-/* ---------- PIN ---------- */
-function pinLen(p) { return (p.roles || []).indexOf("om") >= 0 ? 6 : 4; }
+/* ---------- first sign-in: choose your own PIN ---------- */
 function renderPin(app) {
-  var w = S.wh, st = w.pin, p = st.person, n = pinLen(p);
-  var title = st.step === "new" ? t("setPin") : st.step === "again" ? t("repeatPin") : t("pinFor", { name: p.name });
-  app.append(backRow(function () { w.pin = null; hooks.render(); }, ""));
+  var w = S.wh, st = w.pin, p = st.person;
+  app.append(backRow(function () { signOut(); }, ""));
   var box = el("div", { class: "wh-pinbox" },
-    el("span", { class: "wh-av big", text: initials(p.name) }), el("h2", { style: "margin:6px 0 2px", text: title }),
-    el("div", { class: "small muted", text: st.step === "pin" ? roleTxt(p) : t("setPinSub", { n: n }) }));
-  var dots = el("div", { class: "wh-dots", "aria-label": st.v.length + " of " + n });
-  for (var i = 0; i < n; i++) dots.append(el("span", { class: i < st.v.length ? "on" : "" }));
+    el("span", { class: "wh-av big", text: initials(p.name) }), el("h2", { style: "margin:6px 0 2px", text: st.step === "again" ? t("repeatPin") : t("setPin") }),
+    el("div", { class: "small muted", text: p.name + " · " + t("setPinSub", { n: PIN_N }) }));
+  var dots = el("div", { class: "wh-dots", "aria-label": st.v.length + " of " + PIN_N });
+  for (var i = 0; i < PIN_N; i++) dots.append(el("span", { class: i < st.v.length ? "on" : "" }));
   box.append(dots, el("div", { class: "wh-pinerr", role: "alert", text: st.err || "" }));
   var pad = el("div", { class: "pad wh-pad" });
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].forEach(function (k) {
     if (!k) { pad.append(el("span")); return; }
     pad.append(el("button", { text: k, "aria-label": k === "⌫" ? "Delete" : k, disabled: st.busy, onclick: function () {
-      if (k === "⌫") st.v = st.v.slice(0, -1); else if (st.v.length < n) st.v += k;
+      if (k === "⌫") st.v = st.v.slice(0, -1); else if (st.v.length < PIN_N) st.v += k;
       st.err = ""; hooks.render();
-      if (st.v.length === n) submitPin();
+      if (st.v.length === PIN_N) submitPin();
     } }));
   });
   box.append(pad);
-  if (st.step === "pin") box.append(el("p", { class: "small muted center", style: "margin-top:12px", text: t("forgotPin") }));
   app.append(box);
 }
 async function submitPin() {
-  var w = S.wh, st = w.pin, p = st.person;
+  var st = S.wh.pin;
   if (st.step === "new") { st.first = st.v; st.v = ""; st.step = "again"; hooks.render(); return; }
-  if (st.step === "again") {
-    if (st.v !== st.first) { st.v = ""; st.first = ""; st.step = "new"; st.err = t("pinsDiffer"); hooks.render(); return; }
-    try { st.busy = true; await rpc("person_set_pin", { p_token: st.token, p_pin: st.v }); st.busy = false; startSession(st.res); }
-    catch (e) { st.busy = false; st.v = ""; st.first = ""; st.step = "new"; st.err = errText(e); hooks.render(); }
-    return;
-  }
-  st.busy = true; hooks.render();
-  try {
-    var r = await rpc("person_login", { p_key: w.key, p_person: p.id, p_pin: st.v });
-    st.busy = false;
-    if (!r.ok) {
-      st.v = "";
-      st.err = r.lockedUntil ? t("locked", { t: hhmm(r.lockedUntil) }) : r.gone ? "Not active any more." : t("wrongPin", { n: r.left });
-      if (r.lockedUntil || r.gone) { w.info = null; }
-      hooks.render(); return;
-    }
-    if (r.mustChange) { st.res = r; st.token = r.token; st.v = ""; st.step = "new"; st.err = ""; hooks.render(); return; }
-    startSession(r);
-  } catch (e) { st.busy = false; st.v = ""; st.err = e.code === "OFFLINE" ? t("offline") : errText(e); hooks.render(); }
+  if (st.v !== st.first) { st.v = ""; st.first = ""; st.step = "new"; st.err = t("pinsDiffer"); hooks.render(); return; }
+  try { st.busy = true; hooks.render(); await rpc("person_set_pin", { p_token: st.token, p_pin: st.v }); st.busy = false; startSession(st.res); }
+  catch (e) { st.busy = false; st.v = ""; st.first = ""; st.step = "new"; st.err = e.code === "OFFLINE" ? t("offline") : errText(e); hooks.render(); }
 }
 async function startSession(r) {
   var w = S.wh;
   if (w.langPicked && w.lang !== r.person.lang) { r.person.lang = w.lang; rpc("person_set_lang", { p_token: r.token, p_lang: w.lang }).catch(function () { }); }
   w.langPicked = false;
-  w.pin = null; w.person = r.person; w.token = r.token; w.lang = r.person.lang || w.lang; w.lastAct = Date.now(); w.tab = "today"; w.view = ""; w.lsh = null;
+  w.pin = null; w.person = r.person; w.token = r.token; w.branch = r.branch; w.lang = r.person.lang || w.lang; w.lastAct = Date.now(); w.tab = "today"; w.view = ""; w.lsh = null; w.me = null;
+  w.user = { username: r.person.username, name: r.person.name }; store("mw-user", w.user); store("mw-lang", w.lang);
   S.tokens[w.branch] = r.token; saveTokens();
   if (has(["sup", "om"])) S.sup = { token: r.token, branch: w.branch, wh: true };
+  S.start = null; S.plantPad = false; store("mw-plant", null);
   saveSess(); hooks.render(); window.scrollTo(0, 0);
   loadMaster().catch(function () { });
   loadBranch(w.branch).then(hooks.render, function () { });
@@ -195,15 +231,23 @@ async function startSession(r) {
   if (S.mine && Object.keys(S.mine.sessions).some(function (k) { return S.mine.sessions[k].dirty; })) flush();
 }
 
-/* ---------- monthly stock take, joined from the people screen ---------- */
+/* ---------- monthly stock take: a staff member opens counting on this phone for the helpers ---------- */
+async function loadMe() {
+  var w = S.wh;
+  try { w.me = await rpc("wh_me", { p_token: w.token }); }
+  catch (e) { w.me = { error: true }; if (e.code === "AUTH") { signOut(); return; } }
+  hooks.render();
+}
 async function joinTake() {
+  var w = S.wh;
   try {
-    var r = await rpc("device_join_take", { p_key: S.wh.key });
-    S.wh.joined = true; S.wh.joinTok = r.token; S.tokens[r.branch] = r.token; saveTokens();
+    var r = await rpc("person_join_take", { p_token: w.token });
+    await endPerson();
+    w.joined = true; w.joinTok = r.token; w.branch = r.branch; S.tokens[r.branch] = r.token; saveTokens();
     S.take = r.take; S.start = { step: "confirm", branch: r.branch }; S.mine.active = null;
     await loadMaster().catch(function () { }); await loadBranch(r.branch).catch(function () { });
     hooks.render(); window.scrollTo(0, 0);
-  } catch (e) { msg(t("joinTake"), errText(e)); S.wh.info = null; hooks.render(); }
+  } catch (e) { msg(t("joinTake"), errText(e)); w.me = null; hooks.render(); }
 }
 
 /* ---------- count: the signed-in person counts; no plant code, no name picking ---------- */
@@ -229,6 +273,8 @@ function task(icBg, icFg, ic, title, right, sub, onclick, rightCls) {
 }
 function renderToday(app) {
   var w = S.wh, L = w.lsh, br = S.br[w.branch] || {}, tk = br.take || S.take || {}, cards = [];
+  if (has(["admin", "sup", "om"]) && !w.me && !w.meLoading) { w.meLoading = true; loadMe().finally(function () { w.meLoading = false; }); }
+  if (w.me && w.me.stockTake && has(["admin", "sup", "om"])) cards.push(task("var(--infobg)", "var(--info)", WH_ICON.count, t("joinTake"), "", w.me.stockTake.name + " · " + t("joinTakeSub"), joinTake, "info"));
   if (has(["lo", "om"]) && !L && !w.lshLoading) { w.lshLoading = true; loadLsh().then(hooks.render, function () { }).finally(function () { w.lshLoading = false; }); }
   if (has(["admin", "sup", "om"]) && tk.kind === "daily" && tk.status === "open") {
     var m = Object.keys(S.mine.sessions).map(function (k) { return S.mine.sessions[k]; }).filter(function (x) { return x.branch === w.branch; })[0];
@@ -257,56 +303,3 @@ function renderToday(app) {
   } else if (has(["lo"]) && L && !L.enabled) app.append(el("div", { class: "card muted", text: t("noLsh") }));
 }
 
-/* ---------- setting a device up: plant code, the Ops Manager's name and PIN, a label ---------- */
-export function openSetup(plant) {
-  var st = { plant: plant || "", step: plant ? "loading" : "plant", oms: [], om: null, pin: "", label: "" };
-  function draw() {
-    openModal(function (sh) {
-      var err = el("div", { class: "wh-pinerr", role: "alert", text: st.err || "" });
-      sh.append(el("h3", { text: t("setupDevice") }), el("p", { class: "small muted", text: t("setupSub") }));
-      if (st.step === "plant" || st.step === "loading") {
-        var i = el("input", { inputmode: "numeric", value: st.plant, placeholder: t("plantCode"), autocomplete: "off" });
-        sh.append(i, err, el("div", { class: "row", style: "margin-top:12px" }, el("button", { class: "btn", style: "flex:1", text: t("cancel"), onclick: closeModal }),
-          el("button", { class: "btn primary", style: "flex:2", text: t("next"), onclick: function () { st.plant = i.value.trim(); find(); } })));
-        setTimeout(function () { i.focus(); }, 50);
-      } else if (st.step === "om") {
-        sh.append(el("p", { style: "font-weight:700;margin:0 0 8px", text: st.branch }));
-        var g = el("div", { class: "wh-people" });
-        st.oms.forEach(function (o) { g.append(el("button", { class: "wh-person", onclick: function () { st.om = o; st.step = "pin"; st.pin = ""; st.err = ""; draw(); } }, el("span", { class: "wh-av", text: initials(o.name) }), el("b", { text: o.name }), el("span", { class: "small muted", text: t("roles_om") }))); });
-        if (!st.oms.length) sh.append(el("p", { class: "muted", text: "No Ops Manager set up for " + st.branch + " yet. HQ adds one in Setup → People." }));
-        sh.append(g, err, el("button", { class: "btn block", style: "margin-top:10px", text: t("cancel"), onclick: closeModal }));
-      } else if (st.step === "pin") {
-        var lab = el("input", { value: st.label || "Device " + (new Date().getMonth() + 1) + "-" + new Date().getDate(), placeholder: "Device name, e.g. Tablet 1" });
-        var dots = el("div", { class: "wh-dots" }); for (var k = 0; k < 6; k++) dots.append(el("span", { class: k < st.pin.length ? "on" : "" }));
-        var pad = el("div", { class: "pad wh-pad" });
-        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].forEach(function (x) {
-          if (!x) { pad.append(el("span")); return; }
-          pad.append(el("button", { text: x, onclick: function () { st.label = lab.value; if (x === "⌫") st.pin = st.pin.slice(0, -1); else if (st.pin.length < 6) st.pin += x; st.err = ""; if (st.pin.length === 6) save(); else draw(); } }));
-        });
-        sh.append(el("p", { style: "font-weight:700;margin:0 0 6px", text: t("pinFor", { name: st.om.name }) }), dots, err, pad, el("div", { style: "height:10px" }), lab,
-          el("button", { class: "btn block", style: "margin-top:10px", text: t("back"), onclick: function () { st.step = "om"; draw(); } }));
-      }
-    }, "lock");
-  }
-  async function find() {
-    st.err = ""; st.step = "loading";
-    try {
-      var r = await rpc("device_setup_start", { p_plant: st.plant });
-      if (r.notYet) { st.step = "plant"; st.err = r.branch + " still uses the plant code. HQ switches it to name and PIN in Setup first."; return draw(); }
-      if (!r.ok) { st.step = "plant"; st.err = "No warehouse with that plant code"; return draw(); }
-      st.branch = r.branch; st.oms = r.oms; st.step = "om"; draw();
-    } catch (e) { st.step = "plant"; st.err = errText(e); draw(); }
-  }
-  async function save() {
-    try {
-      var r = await rpc("device_setup", { p_plant: st.plant, p_person: st.om.id, p_pin: st.pin, p_label: st.label });
-      if (!r.ok) { st.pin = ""; st.err = "Wrong PIN, or this person can't set up devices."; return draw(); }
-      store("mw-device", { key: r.key, deviceId: r.deviceId, branch: r.branch, label: st.label });
-      S.wh = { key: r.key, deviceId: r.deviceId, branch: r.branch, label: st.label, tab: "today", view: "", lang: S.wh && S.wh.lang || "en" };
-      S.mine.active = null; S.start = null; closeModal(); hooks.render(); window.scrollTo(0, 0);
-      toast("✓ " + r.branch);
-    } catch (e) { st.pin = ""; st.err = errText(e); draw(); }
-  }
-  if (plant) find(); else draw();
-}
-hooks.whSetup = openSetup;

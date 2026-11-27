@@ -17,7 +17,7 @@ import { renderHqStock, renderPeopleAdmin, renderHqAccounts, lshOverviewCard } f
 
 /* HQ menu: five jobs; Count and Setup have their own sub-tabs */
 var GROUPS = [["overview", "Overview", ["today"]], ["stock", "Stock", ["stock"]], ["count", "Count", ["daily", "home", "master", "count"]], ["kpi", "KPI", ["dash"]], ["setup", "Setup", ["setup", "people", "hq"]]];
-var SUBS = { daily: "Daily count", home: "Monthly stock take", master: "Monthly live counts", count: "Count here", setup: "Settings", people: "People & devices", hq: "HQ accounts" };
+var SUBS = { daily: "Daily count", home: "Monthly stock take", master: "Monthly live counts", count: "Count here", setup: "Settings", people: "People", hq: "HQ accounts" };
 function groupOf(tab) { for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i][2].indexOf(tab) >= 0) return GROUPS[i]; return GROUPS[0]; }
 
 function setHH() { var h = document.querySelector("header"); if (h) document.documentElement.style.setProperty("--hh", h.offsetHeight + "px"); }
@@ -69,7 +69,7 @@ function drawHeader() {
     var wt = whTabs(); tabs.classList.toggle("hidden", !wt.length);
     wt.forEach(function (x) { tabs.append(el("button", { class: S.wh.tab === x[0] ? "on" : "", "aria-current": S.wh.tab === x[0] ? "page" : null, onclick: function () { whGo(x[0]); } }, svg(x[2], 18), x[1])); });
     var lb = $("#lockBtn"); $("#dashBtn").style.display = "none";
-    if (whIn()) { lb.replaceChildren(svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16), el("span", { text: " " + (S.wh.lang === "ms" ? "Selesai" : "Done") })); lb.title = "Done: back to the people screen"; lb.classList.add("primary"); }
+    if (whIn()) { lb.replaceChildren(svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16), el("span", { text: " " + (S.wh.lang === "ms" ? "Selesai" : "Done") })); lb.title = "Done: log out"; lb.classList.add("primary"); }
     else { lb.classList.remove("primary"); lb.replaceChildren(svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>', 16), el("span", { class: "lbl", text: " HQ" })); lb.title = "HQ login"; }
     return;
   }
@@ -158,15 +158,9 @@ function onLockBtn() {
     var go = el("button", { class: "btn primary", style: "flex:2", text: "Log in", onclick: async function () {
       if (!i.value || go.disabled) return; go.disabled = true;
       try {
-        var e1 = em.value.trim(), r = e1 ? await rpc("hq_login", { p_email: e1, p_password: i.value }) : await rpc("admin_login", { p_password: i.value });
-        if (!r.ok) { err.textContent = r.disabled ? "Shared passwords are switched off. Log in with your email." : e1 ? "Wrong email or password" : "Wrong password (or enter your email)"; i.value = ""; return; }
-        if (e1) localStorage.setItem("mw-hq-email", e1);
-        S.admin = { token: r.token, kind: r.kind, user: r.user || null }; saveTokens(); closeModal();
-        if (r.mustChange) setTimeout(function () { hqPassword(true, i.value); }, 50);
-        S.dcc = null; S.viewTake = null; await loadAdmin(); await loadMaster().catch(function () { });
-        S.tab = S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open" ? "home" : "today"; S.todayT = null; render();
-      } catch (e) { err.textContent = errText(e); }
-      finally { go.disabled = false; }
+        var r = await hqSignIn(em.value.trim(), i.value, true);
+        if (!r.ok) { err.textContent = r.err; i.value = ""; }
+      } finally { go.disabled = false; }
     } });
     i.addEventListener("keydown", function (e) { if (e.key === "Enter") go.click(); });
     sh.append(el("h3", { text: "HQ login" }), el("p", { class: "muted small", text: "Your HQ account email and password. (Old shared password: leave the email empty.)" }), em, el("div", { style: "height:8px" }), i, err,
@@ -175,6 +169,20 @@ function onLockBtn() {
     setTimeout(function () { i.focus(); }, 100);
   });
 }
+/* HQ sign-in, from the HQ button or from the first page (email + password); an empty email tries the old shared password */
+async function hqSignIn(e1, pw, modal) {
+  try {
+    var r = e1 ? await rpc("hq_login", { p_email: e1, p_password: pw }) : await rpc("admin_login", { p_password: pw });
+    if (!r.ok) return { ok: false, err: r.disabled ? "Shared passwords are switched off. Log in with your email." : e1 ? "Wrong email or password" : "Wrong password (or enter your email)" };
+    if (e1) localStorage.setItem("mw-hq-email", e1);
+    S.admin = { token: r.token, kind: r.kind, user: r.user || null }; saveTokens(); if (modal) closeModal();
+    if (r.mustChange) setTimeout(function () { hqPassword(true, pw); }, 50);
+    S.dcc = null; S.viewTake = null; await loadAdmin(); await loadMaster().catch(function () { });
+    S.tab = S.adm && S.adm.takeInfo && S.adm.takeInfo.status === "open" ? "home" : "today"; S.todayT = null; render(); window.scrollTo(0, 0);
+    return { ok: true };
+  } catch (e) { return { ok: false, err: errText(e) }; }
+}
+hooks.hqSignIn = function (e1, pw) { return hqSignIn(e1, pw, false); };
 export function hqPassword(first, old0) {
   openModal(function (sh) {
     var o = el("input", { type: "password", placeholder: "Current password", value: old0 || "", autocomplete: "current-password" }), a = el("input", { type: "password", placeholder: "New password (8+ characters)", autocomplete: "new-password" }), b = el("input", { type: "password", placeholder: "Repeat new password", autocomplete: "new-password" });

@@ -11,13 +11,13 @@ at the cut-off, checked every evening against SAP MB52.
 ## Who logs in how
 | Who | How | Can do |
 |---|---|---|
-| Warehouse people (NDD on **Name and PIN**) | The NDD's warehouse device, set up once by the Ops Manager (plant code + their PIN). Tap your name, enter your PIN; **Done** or 5 minutes without use signs out | Logistic Officer: record stock movements (LSH). Warehouse Admin / Supervisor: daily count. Ops Manager: everything, close the day, approve corrections, explain differences, add people |
-| Counter (NDD still on **plant code**) | Warehouse SAP plant code | Count, scan, photos, sign, submit |
-| Monthly stock take on a set-up device | "Join stock take" tile on the people screen | Ops or Finance count, names, signatures (as before) |
-| HQ | Named account: email + password (superadmin, HQ admin, HQ Finance). Old shared passwords work until the superadmin switches them off | Run everything; superadmin manages HQ accounts |
+| Warehouse people (NDD on **Username and PIN**) | First page, any phone: username (e.g. `ravi.1503`) + 6-digit PIN. The phone remembers the last username, so next time only the PIN. **Done** or 5 minutes without use logs out | Logistic Officer: record stock movements (LSH). Warehouse Admin / Supervisor: daily count. Ops Manager: everything, close the day, approve corrections, explain differences, add people |
+| Counter (NDD still on **plant code**) | "Count with the plant code" link on the first page (a phone that used it opens there directly) | Count, scan, photos, sign, submit |
+| Monthly stock take helpers | Admin, Supervisor or OM logs in and taps "Join stock take" on Today; the phone is then open for counting | Ops or Finance count, names, signatures (as before) |
+| HQ | First page or the HQ button: email + password (superadmin, HQ admin, HQ Finance). Old shared passwords work until the superadmin switches them off | Run everything; superadmin manages HQ accounts |
 | Anyone | Dashboard link | What Settings → Public dashboard allows |
 
-HQ menu: **Overview · Stock · Count (Daily, Monthly, live counts, count here) · KPI · Setup (Settings, People & devices, HQ accounts)**.
+HQ menu: **Overview · Stock · Count (Daily, Monthly, live counts, count here) · KPI · Setup (Settings, People, HQ accounts)**.
 
 ## LSH, the daily stock ledger (NDDs with Stock switched on)
 - Areas: **good stock**, **staging** (invoiced in SAP, still in the warehouse: SAP posts GI at invoice) and **bad stock**.
@@ -55,9 +55,9 @@ js/count.js    counter screens          js/scan.js     camera + handheld barcode
 js/photos.js   warehouse photos         js/master.js   admin master view
 js/setup.js    Settings tab + MB52 card js/export.js   Excel + sign-off PDF
 js/app.js      start-up, header, HQ menu, logins
-js/wh.js       warehouse device: set-up, people, PIN, Today, sign-out   js/lsh.js  LSH screens on the device
-js/whadmin.js  HQ: Stock (LSH vs SAP, staging, opening), People & devices, HQ accounts
-js/i18n.js     English / Bahasa Melayu words for the warehouse device
+js/wh.js       first-page login, first PIN, Today, sign-out   js/lsh.js  LSH screens
+js/whadmin.js  HQ: Stock (LSH vs SAP, staging, opening), People, HQ accounts
+js/i18n.js     English / Bahasa Melayu words for warehouse people
 assets/sku/    product photos (carton, box, pack) by SKU code
 dashboard/     public dashboard
 sql/NNN_*.sql  database, numbered migrations (apply in order)
@@ -66,9 +66,9 @@ tests/         backend + UI tests (run locally, no Supabase needed)
 vendor/        zxing (barcodes), SheetJS (Excel), jsPDF (PDF)
 ```
 Security model: every table is closed to the public API. The page can only call the functions in
-`sql/`, and each one checks a token on the server. Warehouse devices hold a random key (stored hashed);
-people sign in with bcrypt-hashed PINs (5 wrong tries lock for 15 minutes) and get a 12-hour token tied to
-the person and the device. Plant-code login remains for NDDs not yet moved; it identifies the warehouse
+`sql/`, and each one checks a token on the server. Warehouse people log in with a
+username and a bcrypt-hashed 6-digit PIN (5 wrong tries lock the person for 15 minutes; tries are also
+rate-limited per username) and get a 12-hour token tied to the person. The device set-up of 2.18.0 is retired. Plant-code login remains for NDDs not yet moved; it identifies the warehouse
 rather than keeping outsiders out. HQ passwords are bcrypt hashes.
 
 ### Adding a feature
@@ -80,7 +80,7 @@ rather than keeping outsiders out. HQ passwords are bcrypt hashes.
 ```
 cd tests && npm i
 node backend.test.mjs                          # 66 checks on the real SQL (PGlite)
-node mw.test.mjs                               # 26 checks: device/person login, HQ accounts, LSH
+node mw.test.mjs                               # 24 checks: username login, HQ accounts, LSH
 BOOTSTRAP_CODE=SETUP-123 node server.mjs &     # local backend on :8787
 python3 ui_test.py                             # 84 end-to-end checks, needs Playwright + Chrome
 ```

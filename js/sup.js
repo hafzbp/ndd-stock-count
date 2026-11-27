@@ -1,5 +1,5 @@
 /* NDD supervisor (plant code + PIN): today's daily count at their warehouse, add SKUs, skip a day, history, ABC plan. */
-import { S, hooks } from "./state.js";
+import { S, hooks, store } from "./state.js";
 import { rpc } from "./api.js";
 import { $, el, fmt, bLabel, msg, confirmBox, openModal, closeModal, errText, toast } from "./ui.js";
 import { variance } from "./pure.js";
@@ -19,8 +19,8 @@ export function supLogin() {
       try {
         var r = await rpc("sup_login", { p_code: pc.value.trim(), p_pin: pin.value.trim() });
         if (r.people) {
-          err.textContent = r.branch + " now signs in with name and PIN on the warehouse device. Tap your name there.";
-          if (hooks.whSetup) err.append(" ", el("a", { href: "#", text: "Ops Manager: set up this device", onclick: function (ev) { ev.preventDefault(); closeModal(); hooks.whSetup(pc.value.trim()); } }));
+          err.textContent = r.branch + " now logs in with a username and PIN on the first page. ";
+          err.append(el("a", { href: "#", text: "Go to log in", onclick: function (ev) { ev.preventDefault(); closeModal(); S.plantPad = false; store("mw-plant", null); S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); } }));
           return;
         }
         if (!r.ok) { err.textContent = "Wrong plant code or PIN."; return; }

@@ -44,7 +44,7 @@ export function plantPad(title, sub, wantBranch, onOk, inline) {
     if (!v || go.disabled) return; go.disabled = true; go.textContent = "Checking…";
     try {
       var r = await rpc("plant_login", { p_code: v });
-      if (!r.ok && r.people) { var pc = v; v = ""; draw(); err.textContent = r.branch + " signs in with name and PIN on its warehouse device."; if (hooks.whSetup) err.append(el("br"), el("button", { class: "link strong", text: "Ops Manager: set up this device", onclick: function () { closeModal(); hooks.whSetup(pc); } })); return; }
+      if (!r.ok && r.people) { var l0 = store("ndd2-last"); if (l0 && l0.code === v) store("ndd2-last", null); store("mw-plant", null); v = ""; draw(); err.textContent = r.branch + " now logs in with a username and PIN."; err.append(el("br"), el("button", { class: "link strong", text: "Go to log in", onclick: function () { closeModal(); S.plantPad = false; S.start = { step: "code" }; hooks.render(); window.scrollTo(0, 0); } })); return; }
       if (!r.ok) { v = ""; draw(); err.textContent = "No warehouse with that plant code"; return; }
       if (wantBranch && r.branch !== wantBranch) { v = ""; draw(); err.textContent = "That code is for " + r.branch + ", not " + wantBranch; return; }
       S.tokens[r.branch] = r.token; saveTokens(); S.saveErr = null; S.lastLogin = { code: v, branch: r.branch }; S.waitBy = S.waitBy || {}; S.waitBy[r.branch] = r.wait || null;
@@ -537,9 +537,13 @@ function renderStart(app) {
   if (S.wh && (S.wh.person || S.wh.joined) && st.step === "code") { st = S.start = S.wh.person ? { step: "confirm", branch: S.wh.branch, role: "ops", names: [S.wh.person.name] } : { step: "confirm", branch: S.wh.branch }; }
 
   if (st.step === "code") {
-    var wrap = el("div", { class: "cstart" });
     if (S.take && S.take.status === "closed") keys = keys.filter(function (k) { return ss[k].dirty; });
     keys = keys.filter(function (k) { return ss[k].dirty || !(S.take && S.take.status === "closed"); });
+    /* the first page is the login; a phone that counts with a plant code (or has a count to continue) opens on the plant code */
+    if (S.plantPad == null) S.plantPad = !!store("mw-plant") || !!store("ndd2-last") || keys.length > 0;
+    if (!S.plantPad && hooks.renderLogin) { hooks.renderLogin(app); return; }
+    var wrap = el("div", { class: "cstart" });
+    wrap.append(el("p", { class: "center", style: "margin:0 0 12px" }, el("button", { class: "link strong", text: "Have a username? Log in", onclick: function () { S.plantPad = false; store("mw-plant", null); hooks.render(); window.scrollTo(0, 0); } })));
     var last = store("ndd2-last"), pp = plantPad("Start counting", "Enter your warehouse plant code, for example 1508.", null, function (br) {
       S.start = { step: "confirm", branch: br }; hooks.render(); window.scrollTo(0, 0);
     }, true);
@@ -567,7 +571,6 @@ function renderStart(app) {
     }
     wrap.append(el("div", { class: "card padcard" }, pp),
       el("p", { class: "center", style: "margin-top:14px" }, el("button", { class: "link strong", text: "Warehouse supervisor? Log in here", onclick: function () { hooks.openSup && hooks.openSup(); } })),
-      el("p", { class: "center", style: "margin-top:8px" }, el("button", { class: "link", text: "Ops Manager: set up this device for My Warehouse", onclick: function () { hooks.whSetup && hooks.whSetup(""); } })),
       el("p", { class: "center small muted", style: "margin-top:18px", text: "Version " + APP_VERSION }));
     app.append(wrap);
     return;

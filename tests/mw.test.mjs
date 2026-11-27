@@ -1,4 +1,4 @@
-// My Warehouse tests: device + person login, HQ accounts, LSH. Run: node mw.test.mjs
+// My Warehouse tests: username + PIN login, HQ accounts, LSH. Run: node mw.test.mjs
 import { setup, rpc, db } from "./server.mjs";
 import assert from "node:assert/strict";
 
@@ -16,76 +16,76 @@ await q(`insert into public.branches (name, plants, active) values ('NDD Shah Al
 await q(`update public.branches set login_mode = 'people' where name in ('NDD Shah Alam', 'NDD Melaka')`);
 
 let OM, OMPIN, LO, LOPIN, KEY, OMTOK, LOTOK, SUPER;
-console.log("people and devices");
-await t("HQ adds an Ops Manager (6-digit temp PIN) and an LO (4 digits); names unique per NDD", async () => {
-  const om = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Aisyah", p_roles: ["om", "admin"] });
-  assert.equal(om.tempPin.length, 6); OM = om.id; OMPIN = om.tempPin;
-  const lo = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Ravi", p_roles: ["lo"] });
-  assert.equal(lo.tempPin.length, 4); LO = lo.id; LOPIN = lo.tempPin;
-  await rejects(rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "ravi", p_roles: ["lo"] }), /already has that name/);
-  await rejects(rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "X", p_roles: ["boss"] }), /at least one role/);
+const login = (u, pin) => rpc("user_login", { p_user: u, p_pin: pin });
+console.log("people and username login");
+await t("HQ adds an Ops Manager and an LO: 6-digit temp PINs, usernames from name + plant; names unique per NDD", async () => {
+  const om = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Aisyah", p_username: "", p_roles: ["om", "admin"] });
+  assert.equal(om.tempPin.length, 6); assert.equal(om.username, "aisyah.1503"); OM = om.id; OMPIN = om.tempPin;
+  const lo = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Ravi K", p_username: "Ravi.SA", p_roles: ["lo"] });
+  assert.equal(lo.tempPin.length, 6); assert.equal(lo.username, "ravi.sa"); LO = lo.id; LOPIN = lo.tempPin;
+  await rejects(rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "ravi k", p_username: "", p_roles: ["lo"] }), /already has that name/);
+  await rejects(rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Melaka", p_id: null, p_name: "Ravi M", p_username: "ravi.sa", p_roles: ["lo"] }), /taken/);
+  await rejects(rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Bad", p_username: "has space", p_roles: ["lo"] }), /no spaces/);
+  await rejects(rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "X", p_username: "", p_roles: ["boss"] }), /at least one role/);
 });
-await t("device set-up: plant-code NDDs refuse; wrong OM PIN refused; right PIN gives a key", async () => {
-  assert.equal((await rpc("device_setup_start", { p_plant: "1501" })).notYet, true);
-  const s = await rpc("device_setup_start", { p_plant: "1503" }); assert.equal(s.branch, "NDD Shah Alam"); assert.equal(s.oms.length, 1);
-  assert.equal((await rpc("device_setup", { p_plant: "1503", p_person: OM, p_pin: "000000", p_label: "Tab 1" })).ok, false);
-  assert.equal((await rpc("device_setup", { p_plant: "1503", p_person: LO, p_pin: LOPIN, p_label: "Tab 1" })).ok, false, "an LO can't set up a device");
-  const r = await rpc("device_setup", { p_plant: "1503", p_person: OM, p_pin: OMPIN, p_label: "Tab 1" }); assert.ok(r.key); KEY = r.key;
-});
-await t("plant code and supervisor PIN no longer open a people-login NDD", async () => {
+await t("plant code and supervisor PIN no longer open a people-login NDD; the old device sign-in is closed", async () => {
   const r = await rpc("plant_login", { p_code: "1503" }); assert.equal(r.ok, false); assert.equal(r.people, true);
   assert.equal((await rpc("plant_login", { p_code: "1501" })).ok, true);
+  const [g] = await q(`select has_function_privilege('anon', 'public.device_setup_start(text)', 'execute') a, has_function_privilege('anon', 'public.user_login(text, text)', 'execute') b`);
+  assert.equal(g.a, false); assert.equal(g.b, true);
 });
-await t("people screen lists the NDD's people; another device key fails", async () => {
-  const i = await rpc("device_info", { p_key: KEY }); assert.equal(i.branch, "NDD Shah Alam"); assert.deepEqual(i.people.map((p) => p.name), ["Aisyah", "Ravi"]);
-  await rejects(rpc("device_info", { p_key: "nope" }), /removed/);
-});
-await t("person sign-in: first time must change PIN; weak PINs refused; OM needs 6 digits", async () => {
-  const r = await rpc("person_login", { p_key: KEY, p_person: LO, p_pin: LOPIN }); assert.equal(r.ok, true); assert.equal(r.mustChange, true); LOTOK = r.token;
-  await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: "1111" }), /4 digits/);
-  await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: "1234" }), /4 digits/);
-  await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: "48201" }), /4 digits/);
-  await rpc("person_set_pin", { p_token: LOTOK, p_pin: "4820" }); LOPIN = "4820";
-  const o = await rpc("person_login", { p_key: KEY, p_person: OM, p_pin: OMPIN }); OMTOK = o.token;
-  await rejects(rpc("person_set_pin", { p_token: OMTOK, p_pin: "4820" }), /6 digits/);
+await t("username login (any case): first time must change PIN; weak or the temporary PIN refused", async () => {
+  assert.equal((await login("nobody", "123456")).ok, false);
+  const r = await login("RAVI.sa", LOPIN); assert.equal(r.ok, true); assert.equal(r.mustChange, true); assert.equal(r.person.username, "ravi.sa"); LOTOK = r.token;
+  await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: "111111" }), /6 digits/);
+  await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: "123456" }), /6 digits/);
+  await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: "4820" }), /6 digits/);
+  await rejects(rpc("person_set_pin", { p_token: LOTOK, p_pin: LOPIN }), /not the temporary/);
+  await rpc("person_set_pin", { p_token: LOTOK, p_pin: "482061" }); LOPIN = "482061";
+  const o = await login("aisyah.1503", OMPIN); OMTOK = o.token;
   await rpc("person_set_pin", { p_token: OMTOK, p_pin: "739214" }); OMPIN = "739214";
-  const [tk] = await q(`select sup, person_id from public.tokens where token = $1`, [OMTOK]); assert.equal(tk.sup, true, "OM token has supervisor rights");
+  const [tk] = await q(`select sup, person_id, device_id from public.tokens where token = $1`, [OMTOK]); assert.equal(tk.sup, true, "OM token has supervisor rights"); assert.equal(tk.device_id, null);
   const [tl] = await q(`select sup from public.tokens where token = $1`, [LOTOK]); assert.equal(tl.sup, false);
+  const me = await rpc("wh_me", { p_token: LOTOK }); assert.equal(me.person.name, "Ravi K"); assert.equal(me.stockTake, null);
 });
 await t("5 wrong PINs lock for 15 minutes; OM unlocks", async () => {
-  for (let i = 0; i < 4; i++) assert.equal((await rpc("person_login", { p_key: KEY, p_person: LO, p_pin: "9999" })).left, 4 - i);
-  const r = await rpc("person_login", { p_key: KEY, p_person: LO, p_pin: "9999" }); assert.ok(r.lockedUntil);
-  assert.ok((await rpc("person_login", { p_key: KEY, p_person: LO, p_pin: LOPIN })).lockedUntil, "right PIN still locked");
+  for (let i = 0; i < 4; i++) assert.equal((await login("ravi.sa", "999999")).left, 4 - i);
+  const r = await login("ravi.sa", "999999"); assert.ok(r.lockedUntil);
+  assert.ok((await login("ravi.sa", LOPIN)).lockedUntil, "right PIN still locked");
   await rejects(rpc("wh_person_unlock", { p_token: LOTOK, p_id: LO }), /Ops Manager/);
   await rpc("wh_person_unlock", { p_token: OMTOK, p_id: LO });
-  LOTOK = (await rpc("person_login", { p_key: KEY, p_person: LO, p_pin: LOPIN })).token; assert.ok(LOTOK);
+  LOTOK = (await login("ravi.sa", LOPIN)).token; assert.ok(LOTOK);
+  await q(`delete from public.login_attempts`);
 });
 await t("OM manages own NDD's people but not Ops Managers or other NDDs", async () => {
-  const a = await rpc("wh_person_save", { p_token: OMTOK, p_branch: "NDD Shah Alam", p_id: null, p_name: "Siti", p_roles: ["admin", "sup"] }); assert.equal(a.tempPin.length, 4);
-  await rejects(rpc("wh_person_save", { p_token: OMTOK, p_branch: "NDD Shah Alam", p_id: null, p_name: "Boss", p_roles: ["om"] }), /only HQ/);
+  const a = await rpc("wh_person_save", { p_token: OMTOK, p_branch: "NDD Shah Alam", p_id: null, p_name: "Siti", p_username: "", p_roles: ["admin", "sup"] }); assert.equal(a.tempPin.length, 6);
+  await rejects(rpc("wh_person_save", { p_token: OMTOK, p_branch: "NDD Shah Alam", p_id: null, p_name: "Boss", p_username: "", p_roles: ["om"] }), /only HQ/);
   await rejects(rpc("wh_people", { p_token: OMTOK, p_branch: "NDD Melaka" }), /Ops Manager or HQ/);
-  const r = await rpc("wh_person_reset", { p_token: OMTOK, p_id: a.id }); assert.equal(r.tempPin.length, 4);
+  const r = await rpc("wh_person_reset", { p_token: OMTOK, p_id: a.id }); assert.equal(r.tempPin.length, 6); assert.equal(r.username, "siti.1503");
   await rejects(rpc("wh_person_reset", { p_token: OMTOK, p_id: OM }), /HQ resets/);
   await rejects(rpc("wh_people", { p_token: LOTOK, p_branch: "NDD Shah Alam" }), /Ops Manager or HQ/);
 });
 await t("acting OM set by HQ gives the om role until the date", async () => {
   const s = (await rpc("wh_people", { p_token: OWNER, p_branch: "NDD Shah Alam" })).find((p) => p.name === "Siti");
   await setToday("2026-12-05");
-  await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: s.id, p_name: "Siti", p_roles: ["admin", "sup"], p_active: true, p_acting_om_until: "2026-12-10" });
+  await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: s.id, p_name: "Siti", p_username: s.username, p_roles: ["admin", "sup"], p_active: true, p_acting_om_until: "2026-12-10" });
   let x = (await rpc("wh_people", { p_token: OWNER, p_branch: "NDD Shah Alam" })).find((p) => p.name === "Siti"); assert.ok(x.roles.includes("om"));
   await setToday("2026-12-11");
   x = (await rpc("wh_people", { p_token: OWNER, p_branch: "NDD Shah Alam" })).find((p) => p.name === "Siti"); assert.ok(!x.roles.includes("om"));
   await q(`delete from public.settings where key = 'test_today'`);
 });
-await t("switched-off person and removed device lose access", async () => {
-  const z = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Temp", p_roles: ["lo"] });
-  const zt = (await rpc("person_login", { p_key: KEY, p_person: z.id, p_pin: z.tempPin })).token; assert.ok(zt);
-  await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: z.id, p_name: "Temp", p_roles: ["lo"], p_active: false });
+await t("switched-off person loses access; an NDD moved back to the plant code refuses usernames", async () => {
+  const z = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Temp", p_username: "", p_roles: ["lo"] });
+  const zt = (await login(z.username, z.tempPin)).token; assert.ok(zt);
+  await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: z.id, p_name: "Temp", p_username: z.username, p_roles: ["lo"], p_active: false });
   await rejects(rpc("person_set_lang", { p_token: zt, p_lang: "ms" }), /sign in again/);
-  const k2 = (await rpc("device_setup", { p_plant: "1503", p_person: OM, p_pin: OMPIN, p_label: "Spare" })).key;
-  const devs = await rpc("admin_devices", { p_token: OWNER }); assert.equal(devs.length, 2);
-  await rpc("admin_device_revoke", { p_token: OWNER, p_id: devs.find((d) => d.label === "Spare").id });
-  await rejects(rpc("device_info", { p_key: k2 }), /removed/);
+  assert.equal((await login(z.username, z.tempPin)).ok, false);
+  const m = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Johor", p_id: null, p_name: "Jo", p_username: "", p_roles: ["lo"] });
+  const r = await login(m.username, m.tempPin); assert.equal(r.ok, false); assert.equal(r.plant, true);
+});
+await t("monthly stock take: Admin/Sup/OM open counting for helpers; an LO can't", async () => {
+  await rejects(rpc("person_join_take", { p_token: OMTOK }), /no stock take open/);
+  await rejects(rpc("person_join_take", { p_token: LOTOK }), /role/);
 });
 
 console.log("HQ accounts");
@@ -105,14 +105,14 @@ await t("superadmin adds a finance account; finance gets a finance token; shared
   assert.equal((await rpc("hq_users_list", { p_token: SUPER })).length, 2);
   await rpc("hq_shared_login", { p_token: SUPER, p_on: false });
   assert.equal((await rpc("admin_login", { p_password: "OwnerPass1" })).disabled, true);
-  await rejects(rpc("admin_devices", { p_token: OWNER }), /owner/);
+  await rejects(rpc("admin_lsh_branch", { p_token: OWNER, p_branch: "NDD Johor", p_login_mode: "plant", p_lsh: false, p_cutoff: "" }), /owner|admin|AUTH|log in/i);
   await rpc("hq_shared_login", { p_token: SUPER, p_on: true });
   OWNER = (await rpc("admin_login", { p_password: "OwnerPass1" })).token;
   const me = await rpc("hq_me", { p_token: SUPER }); assert.equal(me.user.role, "superadmin");
 });
 
 
-const ids = () => ({ OM, LO, OMTOK, LOTOK, OMPIN, LOPIN, SUPER, KEY });
+const ids = () => ({ OM, LO, OMTOK, LOTOK, OMPIN, LOPIN, SUPER });
 console.log("LSH");
 const sum = (bal, area) => bal[area] || 0;
 let SNAP1;
@@ -232,9 +232,8 @@ await t("reset to a closed stock take sets only the SKUs it counted", async () =
   const d = await rpc("lsh_today", { p_token: I().LOTOK }); assert.equal(d.byCode.A1.gs, 2300); assert.equal(d.byCode.B2.gs, 480);
 });
 await t("roles: an LO can't read people or reasons; an Admin (counter) can't record movements", async () => {
-  const s = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Nur", p_roles: ["admin"] });
-  const pin = s.tempPin;
-  const tok = (await rpc("person_login", { p_key: I().KEY, p_person: s.id, p_pin: pin })).token;
+  const s = await rpc("wh_person_save", { p_token: OWNER, p_branch: "NDD Shah Alam", p_id: null, p_name: "Nur", p_username: "", p_roles: ["admin"] });
+  const tok = (await rpc("user_login", { p_user: s.username, p_pin: s.tempPin })).token;
   await rejects(rpc("lsh_add", { p_token: tok, p: { type: "receive", doc: "X", lines: [{ code: "A1", qty: 1 }] } }), /role/);
   await q(`delete from public.settings where key in ('test_today', 'test_now')`);
 });
@@ -252,5 +251,5 @@ await t("an evening MB52 doesn't replace the stock a morning daily count compare
   await q(`delete from public.settings where key in ('test_today', 'test_now')`);
 });
 
-export { OWNER, KEY };
+export { OWNER };
 if (process.argv[1].endsWith("mw.test.mjs")) { console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }

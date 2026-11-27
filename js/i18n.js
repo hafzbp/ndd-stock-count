@@ -3,9 +3,13 @@ import { S } from "./state.js";
 
 var W = {
   en: {
+    login: "Log in", loginSub: "Warehouse: your username and PIN. HQ: your email and password.", username: "Username or email", pinOrPw: "PIN (6 digits)", password: "Password",
+    hi: "Hi, {name}", enterPin: "Enter your PIN", otherUser: "Not {name}? Use another username", wrongLogin: "Wrong username or PIN. Check both and try again.",
+    plantStill: "{b} still counts with the plant code. Use the plant code below.", usePlant: "NDD still on the plant code? Count with the plant code",
+    useLogin: "Have a username? Log in", noUser: "No username yet? Ask your Ops Manager or HQ.",
     appName: "My Warehouse", whoAreYou: "Who are you?", tapName: "Tap your name", pinFor: "PIN for {name}", forgotPin: "Forgot your PIN? Ask your Ops Manager.",
     wrongPin: "Wrong PIN. {n} tries left.", locked: "Locked until {t}. Your Ops Manager can unlock it.", setPin: "Choose your own PIN", setPinSub: "{n} digits that only you know. Not 1234, not all the same.",
-    repeatPin: "Enter it again", pinsDiffer: "The two PINs are different. Start again.", done: "Done", notMe: "Not me", signedOutIdle: "Signed out after 5 minutes without use. Nothing was lost.",
+    repeatPin: "Enter it again", pinsDiffer: "The two PINs are different. Start again.", done: "Done", notMe: "Not me", signedOutIdle: "Logged out after 5 minutes without use. Nothing was lost. Enter your PIN to carry on.",
     today: "Today", stock: "Stock", count: "Count", joinTake: "Join stock take", joinTakeSub: "Monthly stock take is open here",
     setupDevice: "Set up this device", setupSub: "Ops Manager: enter the warehouse plant code, then sign in. The device then stays with this warehouse.",
     plantCode: "Plant code", next: "Next", back: "Back", cancel: "Cancel", save: "Save", saved: "Saved", close: "Close", yes: "Yes", no: "No",
@@ -38,9 +42,13 @@ var W = {
     offline: "No signal. Try again when you have signal.", language: "Bahasa Melayu", cannotUndo: "Can't undo", stockReset: "Stock reset by HQ", unsaved: "Not saved yet", discard: "Discard", continueEntry: "Continue"
   },
   ms: {
+    login: "Log masuk", loginSub: "Gudang: nama pengguna dan PIN anda. HQ: emel dan kata laluan.", username: "Nama pengguna atau emel", pinOrPw: "PIN (6 digit)", password: "Kata laluan",
+    hi: "Hai, {name}", enterPin: "Masukkan PIN anda", otherUser: "Bukan {name}? Guna nama pengguna lain", wrongLogin: "Nama pengguna atau PIN salah. Semak kedua-duanya dan cuba lagi.",
+    plantStill: "{b} masih mengira dengan kod plant. Guna kod plant di bawah.", usePlant: "NDD masih guna kod plant? Kira dengan kod plant",
+    useLogin: "Ada nama pengguna? Log masuk", noUser: "Belum ada nama pengguna? Tanya Ops Manager atau HQ.",
     appName: "My Warehouse", whoAreYou: "Siapa anda?", tapName: "Tekan nama anda", pinFor: "PIN untuk {name}", forgotPin: "Lupa PIN? Tanya Ops Manager anda.",
     wrongPin: "PIN salah. Tinggal {n} cubaan.", locked: "Dikunci sehingga {t}. Ops Manager boleh buka kunci.", setPin: "Pilih PIN anda sendiri", setPinSub: "{n} digit yang hanya anda tahu. Bukan 1234, bukan semua sama.",
-    repeatPin: "Masukkan sekali lagi", pinsDiffer: "Dua PIN tidak sama. Mula semula.", done: "Selesai", notMe: "Bukan saya", signedOutIdle: "Log keluar selepas 5 minit tidak digunakan. Tiada yang hilang.",
+    repeatPin: "Masukkan sekali lagi", pinsDiffer: "Dua PIN tidak sama. Mula semula.", done: "Selesai", notMe: "Bukan saya", signedOutIdle: "Log keluar selepas 5 minit tidak digunakan. Tiada yang hilang. Masukkan PIN untuk teruskan.",
     today: "Hari ini", stock: "Stok", count: "Kira", joinTake: "Sertai stock take", joinTakeSub: "Stock take bulanan dibuka di sini",
     setupDevice: "Sediakan peranti ini", setupSub: "Ops Manager: masukkan kod plant gudang, kemudian log masuk. Peranti ini kekal untuk gudang ini.",
     plantCode: "Kod plant", next: "Seterusnya", back: "Kembali", cancel: "Batal", save: "Simpan", saved: "Disimpan", close: "Tutup", yes: "Ya", no: "Tidak",

@@ -15,6 +15,11 @@ def tab(pg, name):
     pg.click(f"#tabs button:text-is('{g}')")
     if s: pg.click(f".subtabs button:text-is('{s}')")
 
+def sc(pg):
+    # 2.19: the first page is the login; NDDs on the plant code are one tap away
+    pg.wait_for_selector(":text('Start counting'), :text('Count with the plant code')")
+    if pg.is_visible("text=Count with the plant code"): pg.click("text=Count with the plant code")
+    pg.wait_for_selector("text=Start counting")
 def check(name, cond, extra=""):
     global ok, bad
     if cond: ok += 1; print("  ✓", name)
@@ -95,7 +100,7 @@ with sync_playwright() as p:
     pc = ow.inner_text(".card:has(h3:text-is('Warehouses and plant codes'))"); check("Settings shows plant codes, no PIN editing", "1502" in pc and not ow.is_visible("text=Branch PINs"), pc)
 
     print("counter before opening (draft)")
-    op = phone(); op.goto(BASE + "/?api=local"); op.wait_for_selector("text=Start counting")
+    op = phone(); op.goto(BASE + "/?api=local"); sc(op)
     code(op, "9999"); op.wait_for_selector("text=No warehouse with that plant code"); check("unknown plant code rejected", True)
     code(op, "1501"); op.wait_for_selector("text=Today's list isn't ready yet"); check("no MB52 today, monthly still a draft: counter told to wait for HQ", "NDD Alpha" in op.inner_text("main") and "HQ hasn't uploaded today's stock" in op.inner_text("main"))
 
@@ -158,7 +163,7 @@ with sync_playwright() as p:
     op.evaluate("window.dispatchEvent(new Event('online'))"); op.wait_for_timeout(1500); check("autosave → All saved", "All saved" in op.inner_text("#pill"), op.inner_text("#pill"))
 
     print("admin logs out in the middle of counting")
-    ow.click("#lockBtn"); ow.wait_for_selector("text=Start counting"); check("owner logged out → plain counter screen", "HQ" in ow.inner_text("#lockBtn"))
+    ow.click("#lockBtn"); sc(ow); check("owner logged out → plain counter screen", "HQ" in ow.inner_text("#lockBtn"))
     op.fill(".sbox input", "A1"); op.dispatch_event(".sbox input", "input"); op.click(".seg button:text-is('All')"); op.wait_for_timeout(200)
     op.reload(); op.wait_for_selector(".chead"); check("counter unaffected: still counting after reload", not op.is_visible("text=Start counting"))
     op.click(".seg button:text-is('Counted')"); check("counts still there", "53 PCS" in op.locator(".sku:has-text('A1')").first.inner_text())
@@ -171,7 +176,7 @@ with sync_playwright() as p:
     op.click("#sheet >> text=Submit count"); op.wait_for_selector("text=Submitted ✓", timeout=10000); check("submitted, locked", not op.is_visible("#footIn >> text=Submit"))
 
     print("finance phone + warehouse without team list")
-    fn = phone(); fn.goto(BASE + "/?api=local"); fn.wait_for_selector("text=Start counting"); code(fn, "1501")
+    fn = phone(); fn.goto(BASE + "/?api=local"); sc(fn); code(fn, "1501")
     fn.click(".big:has-text('Finance counts again')"); fn.click(".big:has-text('Siti Aminah')"); fn.click(B("Start finance check")); fn.wait_for_selector("text=FINANCE CHECK"); gate(fn)
     def setpcs(c, n):
         fn.fill(".sbox input", c); fn.dispatch_event(".sbox input", "input"); fn.click(f".skuh:has-text('{c}')"); fn.wait_for_selector("#skuv")
@@ -180,7 +185,7 @@ with sync_playwright() as p:
         fn.click(SB("OK")); fn.click("#skuv [aria-label='Back to list']")
     setpcs("A1", 53); setpcs("B2", 99); fn.fill(".sbox input", ""); fn.dispatch_event(".sbox input", "input"); fn.wait_for_timeout(1800)
     check("finance can't see Ops numbers", "53" not in fn.inner_text(".chead"))
-    gm = phone(); gm.goto(BASE + "/?api=local"); gm.wait_for_selector("text=Start counting"); code(gm, "1503")
+    gm = phone(); gm.goto(BASE + "/?api=local"); sc(gm); code(gm, "1503")
     gm.click(".big:has-text('Ops team counts')"); gm.wait_for_selector("input[placeholder='Type your name, then Add']")
     check("no team list → name box straight away", True)
     gm.fill("input[placeholder='Type your name, then Add']", "Rahim"); gm.press("input[placeholder='Type your name, then Add']", "Enter"); gm.click(B("Start ops count")); gm.wait_for_selector("text=OPS COUNT"); gate(gm)
@@ -188,7 +193,7 @@ with sync_playwright() as p:
     print("in-app browser (WhatsApp)")
     wa = phone(ua="Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36 WhatsApp/2.24.1"); wa.goto(BASE + "/?api=local")
     wa.wait_for_selector("text=Open in Chrome first"); check("WhatsApp: open-in-Chrome screen first", wa.get_attribute("a:has-text('Open in Chrome')", "href").startswith("intent://"))
-    wa.click(B("Continue here anyway")); wa.wait_for_selector("text=Start counting"); check("can continue anyway", True)
+    wa.click(B("Continue here anyway")); sc(wa); check("can continue anyway", True)
 
     print("admin: master, recount, close, results")
     tab(ow, 'Master'); ow.wait_for_selector("text=Progress - Ops count vs Finance check")
@@ -217,7 +222,7 @@ with sync_playwright() as p:
     ow.wait_for_selector("#sheet >> text=plant codes ready", timeout=20000); ow.click(SB("OK")); ow.click("main button:text-is('Continue')"); ow.wait_for_selector("text=4. Review and open counting")
     check("review says Partial · 1 SKU", "Partial" in ow.inner_text("main") and "1 SKUs picked" in ow.inner_text("main"))
     ow.click("main button:text-is('Open counting')"); ow.click("#sheet button:text-is('Open')"); ow.wait_for_selector(".state.open")
-    op.reload(); op.wait_for_selector("text=Start counting"); check("old counts gone on phone after new stock take", True)
+    op.reload(); sc(op); check("old counts gone on phone after new stock take", True)
     code(op, "1501"); op.click(".big:has-text('Ops team counts')"); op.click(".big:has-text('Ali Rahman')"); op.click(B("Start ops count"))
     op.wait_for_selector(".kind-monthly >> text=only 1 SKU on your list"); gate(op); check("partial: counter sees 1 SKU", "MONTHLY STOCK TAKE" in op.inner_text(".kind-monthly") and "0 / 1 SKUs counted" in op.inner_text("main"), op.inner_text("main")[:300])
     ow.wait_for_selector("text=History"); ow.click("button.link:has-text('View (read-only)')"); ow.wait_for_selector("text=History (read-only): Test count")
@@ -238,7 +243,7 @@ with sync_playwright() as p:
     check("review shows Single", "One team counts" in ow.inner_text("main"))
     ow.click("main button:text-is('Open counting')"); ow.click("#sheet button:text-is('Open')"); ow.wait_for_selector(".state.open")
     check("open card: Single count + one-team progress table", "Single count" in ow.inner_text("main") and "Count" in ow.inner_text(".mcard") and "Finance check" not in ow.inner_text(".mcards"))
-    op.reload(); op.wait_for_selector("text=Start counting"); code(op, "1501"); op.wait_for_selector(".task")
+    op.reload(); sc(op); code(op, "1501"); op.wait_for_selector(".task")
     op.wait_for_selector("text=Who is counting?"); check("single: team step skipped", not op.is_visible("text=Which team are you?"))
     op.click(".big:has-text('Ali Rahman')"); op.click(B("Start count")); op.wait_for_selector("text=COUNT - count every SKU"); gate(op)
     op.fill(".sbox input", "C3"); op.dispatch_event(".sbox input", "input"); op.wait_for_timeout(300)
